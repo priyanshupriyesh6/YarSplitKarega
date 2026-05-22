@@ -7,18 +7,12 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0F0E17",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0F0E17"
-    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.yarsplitkarega.app"
     },
     "android": {
       "package": "com.yarsplitkarega.app",
-      "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#6C63FF",
         "foregroundImage": "./assets/icon.png"
@@ -42,7 +36,10 @@
               "pathPrefix": "/invite"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
@@ -50,6 +47,14 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#0F0E17"
+        }
+      ],
       [
         "expo-camera",
         {
@@ -67,8 +72,9 @@
     "scheme": "yarsplitkarega",
     "extra": {
       "eas": {
-        "projectId": "yarsplitkarega-app"
+        "projectId": "80cbbfff-e4a9-4558-b9dc-72b73a4ae923"
       }
-    }
+    },
+    "owner": "priyanshupriy6"
   }
 }
