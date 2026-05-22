@@ -122,11 +122,11 @@ export const ReportsScreen: React.FC = () => {
   // Top spender per group
   const memberSpend = useMemo(() => {
     const groupToUse = selectedGroup === 'all' ? null : groups.find((g) => g.id === selectedGroup);
-    const members = groupToUse ? groupToUse.members : [
-      ...new Map(
-        groups.flatMap((g) => g.members).map((m) => [m.uid, m])
-      ).values(),
-    ];
+      const members = groupToUse ? groupToUse.members : Array.from(
+        new Map(
+          groups.flatMap((g) => g.members).map((m) => [m.uid, m])
+        ).values()
+      );
 
     return members.map((member) => {
       const paid = filteredExpenses
