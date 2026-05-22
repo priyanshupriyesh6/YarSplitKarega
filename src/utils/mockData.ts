@@ -1,0 +1,230 @@
+// ─────────────────────────────────────────────
+//  Mock Data — Rich demo data for development
+// ─────────────────────────────────────────────
+
+import { Group, Expense, Settlement, User } from '../types';
+
+export const MOCK_USERS: User[] = [
+  {
+    uid: 'u1',
+    displayName: 'Priya Sharma',
+    email: 'priya@example.com',
+    photoURL: undefined,
+    defaultCurrency: 'INR',
+    createdAt: '2024-01-01T00:00:00Z',
+  },
+  {
+    uid: 'u2',
+    displayName: 'Arjun Mehta',
+    email: 'arjun@example.com',
+    defaultCurrency: 'INR',
+    createdAt: '2024-01-02T00:00:00Z',
+  },
+  {
+    uid: 'u3',
+    displayName: 'Kavya Reddy',
+    email: 'kavya@example.com',
+    defaultCurrency: 'INR',
+    createdAt: '2024-01-03T00:00:00Z',
+  },
+  {
+    uid: 'u4',
+    displayName: 'Ravi Kumar',
+    email: 'ravi@example.com',
+    defaultCurrency: 'INR',
+    createdAt: '2024-01-04T00:00:00Z',
+  },
+];
+
+export const CURRENT_USER = MOCK_USERS[0];
+
+export const MOCK_GROUPS: Group[] = [
+  {
+    id: 'g1',
+    name: 'Goa Trip 2025',
+    emoji: '🏖️',
+    coverColor: '#6C63FF',
+    members: MOCK_USERS.slice(0, 4).map((u) => ({
+      uid: u.uid,
+      displayName: u.displayName,
+      email: u.email,
+      photoURL: u.photoURL,
+    })),
+    createdBy: 'u1',
+    createdAt: '2025-04-01T00:00:00Z',
+    updatedAt: '2025-05-15T00:00:00Z',
+    currency: 'INR',
+    totalSpent: 18450,
+    balances: {
+      u1: 4200,   // Priya is owed ₹4,200
+      u2: -1800,  // Arjun owes ₹1,800
+      u3: -1200,  // Kavya owes ₹1,200
+      u4: -1200,  // Ravi owes ₹1,200
+    },
+    description: 'Annual friends trip to Goa',
+  },
+  {
+    id: 'g2',
+    name: 'Flat Expenses',
+    emoji: '🏠',
+    coverColor: '#FF6584',
+    members: MOCK_USERS.slice(0, 3).map((u) => ({
+      uid: u.uid,
+      displayName: u.displayName,
+      email: u.email,
+    })),
+    createdBy: 'u1',
+    createdAt: '2025-01-01T00:00:00Z',
+    updatedAt: '2025-05-20T00:00:00Z',
+    currency: 'INR',
+    totalSpent: 45600,
+    balances: {
+      u1: 2500,
+      u2: -1500,
+      u3: -1000,
+    },
+    description: 'Monthly rent, groceries, utilities',
+  },
+  {
+    id: 'g3',
+    name: 'Office Lunch Club',
+    emoji: '🍕',
+    coverColor: '#00D9B5',
+    members: MOCK_USERS.slice(1, 4).map((u) => ({
+      uid: u.uid,
+      displayName: u.displayName,
+      email: u.email,
+    })),
+    createdBy: 'u2',
+    createdAt: '2025-03-01T00:00:00Z',
+    updatedAt: '2025-05-21T00:00:00Z',
+    currency: 'INR',
+    totalSpent: 8900,
+    balances: {
+      u2: 1200,
+      u3: -600,
+      u4: -600,
+    },
+  },
+];
+
+export const MOCK_EXPENSES: Expense[] = [
+  {
+    id: 'e1',
+    groupId: 'g1',
+    title: 'Hotel Booking — Casa de Goa',
+    amount: 8400,
+    currency: 'INR',
+    category: 'housing',
+    paidBy: 'u1',
+    paidByName: 'Priya Sharma',
+    splitType: 'equal',
+    splits: [
+      { uid: 'u1', displayName: 'Priya Sharma', amount: 0 },
+      { uid: 'u2', displayName: 'Arjun Mehta', amount: 2100 },
+      { uid: 'u3', displayName: 'Kavya Reddy', amount: 2100 },
+      { uid: 'u4', displayName: 'Ravi Kumar', amount: 2100 },
+    ],
+    date: '2025-05-01',
+    createdAt: '2025-05-01T10:00:00Z',
+    createdBy: 'u1',
+    tags: ['accommodation'],
+  },
+  {
+    id: 'e2',
+    groupId: 'g1',
+    title: 'Flight Tickets',
+    amount: 6000,
+    currency: 'INR',
+    category: 'travel',
+    paidBy: 'u2',
+    paidByName: 'Arjun Mehta',
+    splitType: 'equal',
+    splits: [
+      { uid: 'u1', displayName: 'Priya Sharma', amount: 1500 },
+      { uid: 'u2', displayName: 'Arjun Mehta', amount: 0 },
+      { uid: 'u3', displayName: 'Kavya Reddy', amount: 1500 },
+      { uid: 'u4', displayName: 'Ravi Kumar', amount: 1500 },
+    ],
+    date: '2025-05-03',
+    createdAt: '2025-05-03T08:00:00Z',
+    createdBy: 'u2',
+  },
+  {
+    id: 'e3',
+    groupId: 'g1',
+    title: 'Beach Shack Dinner',
+    amount: 3200,
+    currency: 'INR',
+    category: 'food',
+    paidBy: 'u1',
+    paidByName: 'Priya Sharma',
+    splitType: 'equal',
+    splits: [
+      { uid: 'u1', displayName: 'Priya Sharma', amount: 0 },
+      { uid: 'u2', displayName: 'Arjun Mehta', amount: 800 },
+      { uid: 'u3', displayName: 'Kavya Reddy', amount: 800 },
+      { uid: 'u4', displayName: 'Ravi Kumar', amount: 800 },
+    ],
+    date: '2025-05-10',
+    createdAt: '2025-05-10T20:00:00Z',
+    createdBy: 'u1',
+  },
+  {
+    id: 'e4',
+    groupId: 'g2',
+    title: 'May Rent',
+    amount: 27000,
+    currency: 'INR',
+    category: 'housing',
+    paidBy: 'u1',
+    paidByName: 'Priya Sharma',
+    splitType: 'equal',
+    splits: [
+      { uid: 'u1', displayName: 'Priya Sharma', amount: 0 },
+      { uid: 'u2', displayName: 'Arjun Mehta', amount: 9000 },
+      { uid: 'u3', displayName: 'Kavya Reddy', amount: 9000 },
+    ],
+    date: '2025-05-01',
+    createdAt: '2025-05-01T09:00:00Z',
+    createdBy: 'u1',
+  },
+  {
+    id: 'e5',
+    groupId: 'g2',
+    title: 'Electricity Bill',
+    amount: 2400,
+    currency: 'INR',
+    category: 'utilities',
+    paidBy: 'u2',
+    paidByName: 'Arjun Mehta',
+    splitType: 'equal',
+    splits: [
+      { uid: 'u1', displayName: 'Priya Sharma', amount: 800 },
+      { uid: 'u2', displayName: 'Arjun Mehta', amount: 0 },
+      { uid: 'u3', displayName: 'Kavya Reddy', amount: 800 },
+    ],
+    date: '2025-05-15',
+    createdAt: '2025-05-15T11:00:00Z',
+    createdBy: 'u2',
+  },
+  {
+    id: 'e6',
+    groupId: 'g3',
+    title: 'Pizza Palace Lunch',
+    amount: 1800,
+    currency: 'INR',
+    category: 'food',
+    paidBy: 'u2',
+    paidByName: 'Arjun Mehta',
+    splitType: 'equal',
+    splits: [
+      { uid: 'u2', displayName: 'Arjun Mehta', amount: 0 },
+      { uid: 'u3', displayName: 'Kavya Reddy', amount: 600 },
+      { uid: 'u4', displayName: 'Ravi Kumar', amount: 600 },
+    ],
+    date: '2025-05-21',
+    createdAt: '2025-05-21T13:00:00Z',
+    createdBy: 'u2',
+  },
+];
