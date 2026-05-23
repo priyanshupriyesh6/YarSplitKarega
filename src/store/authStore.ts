@@ -3,9 +3,9 @@
 // ─────────────────────────────────────────────
 
 import { create } from 'zustand';
-import { supabase } from '../utils/supabase';
+import { supabase, handleDeepLink } from '../utils/supabase';
 import { User } from '../types';
-import { Platform } from 'react-native';
+import { Platform, Alert } from 'react-native';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 
@@ -53,13 +53,37 @@ export const useAuthStore = create<AuthStore>()((set, get) => ({
       if (error) throw error;
 
       if (!isWeb && data?.url) {
-        console.log('[Auth] Mobile OAuth URL received. Opening WebBrowser:', data.url);
+        console.log('[Auth] Mobile OAuth URL received. Opening WebBrowser...');
         const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
-        console.log('[Auth] Mobile WebBrowser session finished with type:', result.type);
-        
-        // If user manually cancels the browser modal (result.type === 'cancel' or 'dismiss'),
-        // we must dismiss the loading screen!
-        if (result.type !== 'success') {
+        console.log('[Auth] WebBrowser result type:', result.type);
+
+        if (result.type === 'success' && result.url) {
+          // ✅ Directly parse the redirect URL — do NOT rely on Linking listener
+          // which is unreliable on Android APKs.
+          console.log('[Auth] WebBrowser success, parsing redirect URL directly...');
+          await handleDeepLink(result.url);
+          
+          // Force active check and set state immediately
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            console.log('[Auth] Google Login: Session found after deep link. Setting state directly.');
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', session.user.id)
+              .single();
+
+            set({
+              user: buildUserData(session.user, profile),
+              isAuthenticated: true,
+              isLoading: false,
+            });
+          } else {
+            set({ isLoading: false });
+          }
+        } else {
+          // User cancelled or browser dismissed — clear the loader
+          console.log('[Auth] WebBrowser cancelled/dismissed. Clearing loader.');
           set({ isLoading: false });
         }
       }
@@ -72,13 +96,47 @@ export const useAuthStore = create<AuthStore>()((set, get) => ({
 
   signInWithEmail: async (email, password) => {
     set({ isLoading: true });
+
+    // Safety valve: if onAuthStateChange doesn't fire within 10 seconds,
+    // force-clear the loader so the user isn't stuck indefinitely.
+    const safetyTimer = setTimeout(() => {
+      if (useAuthStore.getState().isLoading) {
+        console.warn('[Auth] signInWithEmail: safety timeout hit, clearing loader.');
+        set({ isLoading: false });
+      }
+    }, 10000);
+
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
-      if (error) throw error;
+      
+      clearTimeout(safetyTimer);
+
+      if (error) {
+        set({ isLoading: false });
+        throw error;
+      }
+
+      if (data?.session?.user) {
+        console.log('[Auth] signInWithEmail: Password auth succeeded. Setting state directly.');
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', data.session.user.id)
+          .single();
+
+        set({
+          user: buildUserData(data.session.user, profile),
+          isAuthenticated: true,
+          isLoading: false,
+        });
+      } else {
+        set({ isLoading: false });
+      }
     } catch (e) {
+      clearTimeout(safetyTimer);
       set({ isLoading: false });
       throw e;
     }
@@ -87,7 +145,7 @@ export const useAuthStore = create<AuthStore>()((set, get) => ({
   signUp: async (name, email, password) => {
     set({ isLoading: true });
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -96,7 +154,36 @@ export const useAuthStore = create<AuthStore>()((set, get) => ({
           },
         },
       });
-      if (error) throw error;
+
+      if (error) {
+        set({ isLoading: false });
+        throw error;
+      }
+
+      // If Supabase requires email confirmation, data.session will be null.
+      // In this case we immediately clear the loader and show a friendly prompt.
+      if (!data.session) {
+        set({ isLoading: false });
+        Alert.alert(
+          'Confirm your email ✉️',
+          `We sent a confirmation link to ${email}. Please check your inbox (and spam folder) and tap the link to activate your account, then sign in.`,
+          [{ text: 'Got it', style: 'default' }]
+        );
+        return;
+      }
+
+      console.log('[Auth] signUp: Session created instantly. Setting state directly.');
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', data.session.user.id)
+        .single();
+
+      set({
+        user: buildUserData(data.session.user, profile),
+        isAuthenticated: true,
+        isLoading: false,
+      });
     } catch (e) {
       set({ isLoading: false });
       throw e;
@@ -168,7 +255,7 @@ const initializeAuth = async () => {
   const safetyTimeout = setTimeout(() => {
     console.warn('[Auth] initializeAuth: Session check is taking too long. Forcing loader dismissal.');
     useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false });
-  }, 1500);
+  }, 6000);
 
   try {
     const { data: { session }, error } = await supabase.auth.getSession();
@@ -204,29 +291,63 @@ const initializeAuth = async () => {
 initializeAuth();
 
 // Subscribe to Supabase Auth State Changes in real-time
-supabase.auth.onAuthStateChange(async (event, session) => {
-  if (session?.user) {
-    try {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .single();
+//
+// ⚠️ IMPORTANT: Per Supabase JS v2 docs, the onAuthStateChange callback runs
+// synchronously inside the internal auth lock. Calling ANY other Supabase
+// method (even a .from().select()) inside this callback will DEADLOCK the lock,
+// causing the session to never be committed — which means isAuthenticated
+// stays false and the user is bounced back to the login screen.
+//
+// Fix: set auth state immediately from the session data we already have,
+// then fetch the profile in a deferred setTimeout(0) to enrich display name.
+supabase.auth.onAuthStateChange((event, session) => {
+  console.log('[Auth] onAuthStateChange fired:', event, { hasSession: !!session });
 
-      useAuthStore.setState({
-        user: buildUserData(session.user, profile),
-        isAuthenticated: true,
-        isLoading: false
-      });
-    } catch (err) {
+  if (session?.user) {
+    const currentState = useAuthStore.getState();
+    const isAlreadyAuthenticated = currentState.isAuthenticated && currentState.user?.uid === session.user.id;
+
+    if (!isAlreadyAuthenticated) {
+      // Set authenticated immediately using data already in the session object.
+      // Do NOT await anything here — that would deadlock the Supabase lock.
       useAuthStore.setState({
         user: buildUserData(session.user, null),
         isAuthenticated: true,
-        isLoading: false
+        isLoading: false,
       });
+
+      // Enrich display name from the profiles table AFTER the lock is released.
+      setTimeout(async () => {
+        try {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+
+          if (profile) {
+            useAuthStore.setState((state) => ({
+              user: state.user ? buildUserData(session.user, profile) : null,
+            }));
+          }
+        } catch (err) {
+          // Profile fetch failed — user is still authenticated, just using fallback name
+          console.warn('[Auth] Profile enrichment failed (non-fatal):', err);
+        }
+      }, 0);
+    } else {
+      if (currentState.isLoading) {
+        useAuthStore.setState({ isLoading: false });
+      }
     }
-  } else {
-    // Session is invalid, expired, or logged out
+  } else if (event === 'SIGNED_OUT') {
     useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false });
+  } else {
+    // Only set authenticated: false if we are not currently trying to log in (isLoading is false).
+    // This prevents asynchronous transitional events from resetting the login state.
+    const currentState = useAuthStore.getState();
+    if (!currentState.isLoading) {
+      useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false });
+    }
   }
 });

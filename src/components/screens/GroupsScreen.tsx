@@ -298,7 +298,7 @@ export const GroupDetailScreen: React.FC = () => {
               </View>
             ) : (
               expenses.map((expense) => {
-                const category = CATEGORY_MAP[expense.category];
+                const category = CATEGORY_MAP[expense.category] || CATEGORY_MAP['other'];
                 const myShare = expense.splits.find((s) => s.uid === CURRENT_USER.uid)?.amount ?? 0;
                 const iPaid = expense.paidBy === CURRENT_USER.uid;
 

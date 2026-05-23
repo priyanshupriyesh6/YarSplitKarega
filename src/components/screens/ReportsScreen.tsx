@@ -20,6 +20,7 @@ import { format, startOfMonth, endOfMonth, subMonths, parseISO, isWithinInterval
 
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../../constants/theme';
 import { useExpenseStore } from '../../store/expenseStore';
+import { useAuthStore } from '../../store/authStore';
 import { CURRENT_USER } from '../../utils/mockData';
 import { formatCurrency, formatMonth } from '../../utils/formatters';
 import { CATEGORIES, CATEGORY_MAP, CategoryId } from '../../constants/categories';
@@ -35,8 +36,18 @@ export const ReportsScreen: React.FC = () => {
   const { groups, expenses } = useExpenseStore();
   const [selectedGroup, setSelectedGroup] = useState<string>('all');
   const [timeRange, setTimeRange] = useState<TimeRange>('3M');
+  const [reportType, setReportType] = useState<'group' | 'individual'>('group');
 
-  const allGroups = [{ id: 'all', name: 'All Groups', emoji: '📊' }, ...groups];
+  const { user } = useAuthStore();
+  const activeUser = user || CURRENT_USER;
+
+  // Find Personal group ID to categorize individual vs group
+  const personalGroup = groups.find(
+    (g) => g.name === 'Personal Expenses' && g.createdBy === activeUser.uid
+  );
+
+  const visibleGroups = groups.filter((g) => g.id !== personalGroup?.id);
+  const allGroups = [{ id: 'all', name: 'All Groups', emoji: '📊' }, ...visibleGroups];
 
   // Filter expenses by group and time range
   const filteredExpenses = useMemo(() => {
@@ -48,16 +59,22 @@ export const ReportsScreen: React.FC = () => {
             : new Date('2020-01-01');
 
     return expenses.filter((e) => {
-      const matchesGroup = selectedGroup === 'all' || e.groupId === selectedGroup;
+      const matchesType = reportType === 'individual' 
+        ? e.groupId === personalGroup?.id 
+        : e.groupId !== personalGroup?.id;
+
+      if (!matchesType) return false;
+
+      const matchesGroup = reportType === 'individual' || selectedGroup === 'all' || e.groupId === selectedGroup;
       const expDate = parseISO(e.date);
       const matchesTime = expDate >= rangeStart;
       return matchesGroup && matchesTime;
     });
-  }, [expenses, selectedGroup, timeRange]);
+  }, [expenses, selectedGroup, timeRange, reportType, personalGroup]);
 
   const totalSpent = filteredExpenses.reduce((s, e) => s + e.amount, 0);
   const myTotalShare = filteredExpenses.reduce((s, e) => {
-    const split = e.splits.find((sp) => sp.uid === CURRENT_USER.uid);
+    const split = e.splits.find((sp) => sp.uid === activeUser.uid);
     return s + (split?.amount ?? 0);
   }, 0);
   const avgExpense = filteredExpenses.length > 0
@@ -71,7 +88,7 @@ export const ReportsScreen: React.FC = () => {
     }
     return Object.entries(map)
       .map(([catId, amount]) => {
-        const cat = CATEGORY_MAP[catId as CategoryId];
+        const cat = CATEGORY_MAP[catId as CategoryId] || CATEGORY_MAP['other'];
         return {
           catId,
           label: cat.label,
@@ -121,10 +138,10 @@ export const ReportsScreen: React.FC = () => {
 
   // Top spender per group
   const memberSpend = useMemo(() => {
-    const groupToUse = selectedGroup === 'all' ? null : groups.find((g) => g.id === selectedGroup);
+    const groupToUse = selectedGroup === 'all' ? null : visibleGroups.find((g) => g.id === selectedGroup);
       const members = groupToUse ? groupToUse.members : Array.from(
         new Map(
-          groups.flatMap((g) => g.members).map((m) => [m.uid, m])
+          visibleGroups.flatMap((g) => g.members).map((m) => [m.uid, m])
         ).values()
       );
 
@@ -138,7 +155,7 @@ export const ReportsScreen: React.FC = () => {
         .reduce((s, sp) => s + sp.amount, 0);
       return { ...member, paid, owed, net: paid - owed };
     }).sort((a, b) => b.paid - a.paid);
-  }, [filteredExpenses, selectedGroup, groups]);
+  }, [filteredExpenses, selectedGroup, visibleGroups]);
 
   return (
     <View style={styles.container}>
@@ -158,31 +175,61 @@ export const ReportsScreen: React.FC = () => {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Group filter */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterRow}
-        >
-          {allGroups.map((g) => (
-            <TouchableOpacity
-              key={g.id}
-              onPress={() => setSelectedGroup(g.id)}
-              style={[
-                styles.groupFilter,
-                selectedGroup === g.id && styles.groupFilterActive,
-              ]}
-            >
-              <Text style={styles.groupFilterEmoji}>{g.emoji}</Text>
-              <Text style={[
-                styles.groupFilterText,
-                selectedGroup === g.id && { color: Colors.primary },
-              ]}>
-                {g.name}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        {/* Toggle Report Type */}
+        <View style={styles.toggleRow}>
+          <TouchableOpacity
+            style={[styles.toggleBtn, reportType === 'group' && styles.toggleBtnActive]}
+            onPress={() => {
+              setReportType('group');
+              setSelectedGroup('all');
+            }}
+          >
+            <Ionicons name="people-outline" size={16} color={reportType === 'group' ? Colors.text : Colors.textSecondary} />
+            <Text style={[styles.toggleText, reportType === 'group' && styles.toggleTextActive]}>
+              Group Reports
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.toggleBtn, reportType === 'individual' && styles.toggleBtnActive]}
+            onPress={() => {
+              setReportType('individual');
+              setSelectedGroup('all');
+            }}
+          >
+            <Ionicons name="person-outline" size={16} color={reportType === 'individual' ? Colors.text : Colors.textSecondary} />
+            <Text style={[styles.toggleText, reportType === 'individual' && styles.toggleTextActive]}>
+              Personal Reports
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Group filter - Only visible in Group Reports */}
+        {reportType === 'group' && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterRow}
+          >
+            {allGroups.map((g) => (
+              <TouchableOpacity
+                key={g.id}
+                onPress={() => setSelectedGroup(g.id)}
+                style={[
+                  styles.groupFilter,
+                  selectedGroup === g.id && styles.groupFilterActive,
+                ]}
+              >
+                <Text style={styles.groupFilterEmoji}>{g.emoji}</Text>
+                <Text style={[
+                  styles.groupFilterText,
+                  selectedGroup === g.id && { color: Colors.primary },
+                ]}>
+                  {g.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
 
         {/* Time range pills */}
         <View style={styles.timeRangeRow}>
@@ -332,8 +379,8 @@ export const ReportsScreen: React.FC = () => {
           </Card>
         )}
 
-        {/* Member spending breakdown */}
-        {memberSpend.length > 0 && (
+        {/* Member spending breakdown - Only shown for Group Reports */}
+        {reportType === 'group' && memberSpend.length > 0 && (
           <Card style={styles.chartCard} elevated>
             <Text style={styles.chartTitle}>Member Spending</Text>
             {memberSpend.map((member, i) => {
@@ -348,7 +395,7 @@ export const ReportsScreen: React.FC = () => {
                   <View style={styles.memberBarSection}>
                     <View style={styles.memberBarHeader}>
                       <Text style={styles.memberName} numberOfLines={1}>
-                        {member.uid === CURRENT_USER.uid ? 'You' : member.displayName}
+                        {member.uid === activeUser.uid ? 'You' : member.displayName}
                       </Text>
                       <Text style={styles.memberPaid}>
                         {formatCurrency(member.paid, 'INR')}
@@ -662,5 +709,35 @@ const styles = StyleSheet.create({
   catDetailPct: {
     fontSize: Typography.fontSize.xs,
     fontFamily: Typography.fontFamily.semiBold,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    backgroundColor: Colors.backgroundCard,
+    borderRadius: BorderRadius.lg,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+    marginBottom: Spacing.sm,
+  },
+  toggleBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: BorderRadius.md,
+    gap: 8,
+  },
+  toggleBtnActive: {
+    backgroundColor: Colors.primary,
+    ...Shadow.sm,
+  },
+  toggleText: {
+    fontSize: Typography.fontSize.xs,
+    color: Colors.textMuted,
+    fontFamily: Typography.fontFamily.semiBold,
+  },
+  toggleTextActive: {
+    color: Colors.text,
   },
 });

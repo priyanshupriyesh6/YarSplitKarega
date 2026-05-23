@@ -11,7 +11,11 @@ import {
   TouchableOpacity,
   Alert,
   Switch,
+  Modal,
+  TextInput,
 } from 'react-native';
+import * as Sharing from 'expo-sharing';
+import { documentDirectory, writeAsStringAsync, EncodingType } from 'expo-file-system/legacy';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,12 +28,14 @@ import { Card, Avatar, Badge, Divider } from '../ui';
 
 export const ProfileScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
-  const { user, signOut } = useAuthStore();
+  const { user, signOut, updateProfile } = useAuthStore();
   const { groups, expenses, getTotalOwed, getTotalIOwe } = useExpenseStore();
 
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [darkMode, setDarkMode] = useState(true);
   const [weeklyDigest, setWeeklyDigest] = useState(false);
+  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
+  const [editDisplayName, setEditDisplayName] = useState(user?.displayName || '');
 
   const totalOwed = getTotalOwed();
   const totalIOwe = getTotalIOwe();
@@ -51,13 +57,81 @@ export const ProfileScreen: React.FC = () => {
     );
   };
 
+  const handleExportData = async () => {
+    try {
+      if (expenses.length === 0) {
+        Alert.alert('Export Data', 'You have no expense records to export.');
+        return;
+      }
+
+      // Generate CSV content
+      let csvContent = 'Type,Title,Amount,Currency,Category,Date,PaidBy,Group\n';
+      expenses.forEach((e) => {
+        const groupName = groups.find((g) => g.id === e.groupId)?.name || 'Unknown Group';
+        const row = `Expense,"${e.title.replace(/"/g, '""')}",${e.amount},${e.currency},${e.category},${e.date},"${e.paidByName.replace(/"/g, '""')}","${groupName.replace(/"/g, '""')}"\n`;
+        csvContent += row;
+      });
+
+      const fileUri = documentDirectory + 'yarsplitkarega_export.csv';
+      await writeAsStringAsync(fileUri, csvContent, {
+        encoding: EncodingType.UTF8,
+      });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'text/csv',
+          dialogTitle: 'Export split smart data',
+          UTI: 'public.comma-separated-values-text',
+        });
+      } else {
+        Alert.alert('Export Complete', 'CSV file saved locally under document directory, but sharing is unavailable.');
+      }
+    } catch (err) {
+      console.error('Export error:', err);
+      Alert.alert('Export Failed', 'Failed to generate and share CSV file.');
+    }
+  };
+
+  const handleShareApp = async () => {
+    try {
+      if (await Sharing.isAvailableAsync()) {
+        const fileUri = documentDirectory + 'share.txt';
+        await writeAsStringAsync(fileUri, 'Hey! Join SplitSmart (YarSplitKarega) to track and split expenses with me seamlessly: https://yarsplitkarega.app/download');
+        await Sharing.shareAsync(fileUri, { dialogTitle: 'Share YarSplitKarega' });
+      } else {
+        Alert.alert('Share SplitSmart', 'Tell your friends to check out SplitSmart (YarSplitKarega)!');
+      }
+    } catch (e) {
+      Alert.alert('Share SplitSmart', 'Tell your friends to check out SplitSmart (YarSplitKarega)!');
+    }
+  };
+
   const MENU_SECTIONS = [
     {
       title: 'Account',
       items: [
-        { icon: 'person-outline', label: 'Edit Profile', iconColor: Colors.primary, onPress: () => {} },
-        { icon: 'shield-checkmark-outline', label: 'Security', iconColor: Colors.accent, onPress: () => {} },
-        { icon: 'link-outline', label: 'Connected Accounts', iconColor: Colors.secondary, badge: 'Google', onPress: () => {} },
+        { 
+          icon: 'person-outline', 
+          label: 'Edit Profile', 
+          iconColor: Colors.primary, 
+          onPress: () => { 
+            setEditDisplayName(user?.displayName || ''); 
+            setIsEditModalVisible(true); 
+          } 
+        },
+        { 
+          icon: 'shield-checkmark-outline', 
+          label: 'Security', 
+          iconColor: Colors.accent, 
+          onPress: () => Alert.alert('Security', 'Your SplitSmart account is encrypted and secured by Supabase high-grade JWT tokens.') 
+        },
+        { 
+          icon: 'link-outline', 
+          label: 'Connected Accounts', 
+          iconColor: Colors.secondary, 
+          badge: 'Google', 
+          onPress: () => Alert.alert('Connected Accounts', 'Your profile is securely linked and authenticated via Google OAuth.') 
+        },
       ],
     },
     {
@@ -69,7 +143,10 @@ export const ProfileScreen: React.FC = () => {
           iconColor: Colors.warning,
           toggle: true,
           value: notificationsEnabled,
-          onToggle: setNotificationsEnabled,
+          onToggle: (val: boolean) => {
+            setNotificationsEnabled(val);
+            Alert.alert('Notifications', `Push notifications have been ${val ? 'enabled' : 'disabled'}.`);
+          },
         },
         {
           icon: 'moon-outline',
@@ -77,7 +154,10 @@ export const ProfileScreen: React.FC = () => {
           iconColor: Colors.primaryLight,
           toggle: true,
           value: darkMode,
-          onToggle: setDarkMode,
+          onToggle: (val: boolean) => {
+            setDarkMode(val);
+            Alert.alert('Theme Preferences', `Dark Mode has been ${val ? 'enabled' : 'disabled'}. SplitSmart matches your premium device dark theme.`);
+          },
         },
         {
           icon: 'mail-outline',
@@ -85,27 +165,51 @@ export const ProfileScreen: React.FC = () => {
           iconColor: Colors.accent,
           toggle: true,
           value: weeklyDigest,
-          onToggle: setWeeklyDigest,
+          onToggle: (val: boolean) => {
+            setWeeklyDigest(val);
+            Alert.alert('Weekly Digest', `Weekly digest updates have been ${val ? 'enabled' : 'disabled'}. You will receive a summary of your active splits via email.`);
+          },
         },
       ],
     },
     {
       title: 'Data',
       items: [
-        { icon: 'cloud-download-outline', label: 'Export Data', iconColor: Colors.positive, onPress: () => Alert.alert('Export', 'Your data will be exported as CSV') },
-        { icon: 'trash-outline', label: 'Clear All Data', iconColor: Colors.error, onPress: () => Alert.alert('Warning', 'This will delete all your local data permanently', [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Delete', style: 'destructive', onPress: () => {} },
-        ]) },
+        { 
+          icon: 'cloud-download-outline', 
+          label: 'Export Data', 
+          iconColor: Colors.positive, 
+          onPress: handleExportData 
+        },
       ],
     },
     {
       title: 'About',
       items: [
-        { icon: 'information-circle-outline', label: 'About yarsplitkarega', iconColor: Colors.textSecondary, onPress: () => {} },
-        { icon: 'star-outline', label: 'Rate the App', iconColor: Colors.warning, onPress: () => {} },
-        { icon: 'share-outline', label: 'Share with Friends', iconColor: Colors.primary, onPress: () => {} },
-        { icon: 'document-text-outline', label: 'Privacy Policy', iconColor: Colors.textMuted, onPress: () => {} },
+        { 
+          icon: 'information-circle-outline', 
+          label: 'About yarsplitkarega', 
+          iconColor: Colors.textSecondary, 
+          onPress: () => Alert.alert('About YarSplitKarega', 'YarSplitKarega (SplitSmart) is a premium personal expense manager and group bill-splitting mobile application. Built using Expo, React Native, Supabase, and OCR.space.') 
+        },
+        { 
+          icon: 'star-outline', 
+          label: 'Rate the App', 
+          iconColor: Colors.warning, 
+          onPress: () => Alert.alert('Rate the App', 'Thank you for your support! App store rating features are currently simulated.') 
+        },
+        { 
+          icon: 'share-outline', 
+          label: 'Share with Friends', 
+          iconColor: Colors.primary, 
+          onPress: handleShareApp 
+        },
+        { 
+          icon: 'document-text-outline', 
+          label: 'Privacy Policy', 
+          iconColor: Colors.textMuted, 
+          onPress: () => Alert.alert('Privacy Policy', 'Your daily financial data is encrypted and saved securely inside Supabase cloud database instance. We do not sell or track your personal financial details.') 
+        },
       ],
     },
   ];
@@ -230,6 +334,61 @@ export const ProfileScreen: React.FC = () => {
 
         <Text style={styles.version}>yarsplitkarega v1.0.0 · Made with ❤️ in India</Text>
       </ScrollView>
+
+      {/* Edit Profile Modal */}
+      <Modal
+        visible={isEditModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsEditModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <Card style={styles.modalContent} elevated>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Edit Profile</Text>
+              <TouchableOpacity onPress={() => setIsEditModalVisible(false)}>
+                <Ionicons name="close" size={20} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+            
+            <Text style={styles.modalLabel}>Display Name</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={editDisplayName}
+              onChangeText={setEditDisplayName}
+              placeholder="Enter your name"
+              placeholderTextColor={Colors.textMuted}
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity 
+                style={styles.modalCancelBtn} 
+                onPress={() => setIsEditModalVisible(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={styles.modalSaveBtn} 
+                onPress={async () => {
+                  if (editDisplayName.trim().length === 0) {
+                    Alert.alert('Error', 'Name cannot be empty');
+                    return;
+                  }
+                  try {
+                    await updateProfile({ displayName: editDisplayName.trim() });
+                    setIsEditModalVisible(false);
+                    Alert.alert('Success', 'Profile updated successfully!');
+                  } catch (e: any) {
+                    Alert.alert('Error', e.message || 'Failed to update profile');
+                  }
+                }}
+              >
+                <Text style={styles.modalSaveText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </Card>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -387,5 +546,78 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamily.regular,
     textAlign: 'center',
     paddingBottom: Spacing.md,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.base,
+  },
+  modalContent: {
+    width: '100%',
+    maxWidth: 340,
+    padding: Spacing.xl,
+    gap: Spacing.base,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.surfaceBorder,
+    paddingBottom: Spacing.sm,
+  },
+  modalTitle: {
+    fontSize: Typography.fontSize.lg,
+    color: Colors.text,
+    fontFamily: Typography.fontFamily.bold,
+  },
+  modalLabel: {
+    fontSize: Typography.fontSize.sm,
+    color: Colors.textSecondary,
+    fontFamily: Typography.fontFamily.semiBold,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  modalInput: {
+    backgroundColor: Colors.backgroundInput,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+    color: Colors.text,
+    fontFamily: Typography.fontFamily.regular,
+    fontSize: Typography.fontSize.base,
+    paddingHorizontal: Spacing.base,
+    paddingVertical: Spacing.md,
+    width: '100%',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
+  },
+  modalCancelBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: Spacing.base,
+    borderRadius: BorderRadius.md,
+  },
+  modalCancelText: {
+    fontSize: Typography.fontSize.sm,
+    color: Colors.textSecondary,
+    fontFamily: Typography.fontFamily.medium,
+  },
+  modalSaveBtn: {
+    backgroundColor: Colors.primary,
+    paddingVertical: 10,
+    paddingHorizontal: Spacing.base,
+    borderRadius: BorderRadius.md,
+    ...Shadow.sm,
+  },
+  modalSaveText: {
+    fontSize: Typography.fontSize.sm,
+    color: Colors.text,
+    fontFamily: Typography.fontFamily.bold,
   },
 });

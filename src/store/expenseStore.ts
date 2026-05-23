@@ -23,6 +23,7 @@ interface ExpenseStore {
   updateGroup: (id: string, updates: Partial<Group>) => Promise<void>;
   deleteGroup: (id: string) => Promise<void>;
   getGroup: (id: string) => Group | undefined;
+  getOrCreatePersonalGroup: () => Promise<Group>;
 
   // Expense actions
   addExpense: (expense: Omit<Expense, 'id' | 'createdAt' | 'createdBy'>) => Promise<Expense>;
@@ -317,6 +318,72 @@ export const useExpenseStore = create<ExpenseStore>()((set, get) => ({
   },
 
   getGroup: (id) => get().groups.find((g) => g.id === id),
+
+  getOrCreatePersonalGroup: async () => {
+    const currentUser = useAuthStore.getState().user;
+    if (!currentUser) throw new Error('Not authenticated');
+
+    // 1. Check if we already have a Personal Expenses group loaded in state
+    let personalGroup = get().groups.find(
+      (g) => g.createdBy === currentUser.uid && g.members.length === 1 && g.name === 'Personal Expenses'
+    );
+
+    if (personalGroup) return personalGroup;
+
+    // 2. Double check the database members
+    try {
+      const { data: memberGroups, error: mgError } = await supabase
+        .from('group_members')
+        .select(`
+          group_id,
+          groups (
+            id,
+            name,
+            emoji,
+            cover_color,
+            currency,
+            description,
+            created_by,
+            created_at,
+            updated_at,
+            total_spent,
+            balances
+          )
+        `)
+        .eq('profile_id', currentUser.uid);
+
+      if (!mgError && memberGroups) {
+        const dbPersonal = memberGroups.find((mg: any) => (mg.groups as any)?.name === 'Personal Expenses' && (mg.groups as any)?.created_by === currentUser.uid);
+        if (dbPersonal && dbPersonal.groups) {
+          await get().loadAllData();
+          const syncedGroup = get().groups.find((g) => g.id === (dbPersonal.groups as any).id);
+          if (syncedGroup) return syncedGroup;
+        }
+      }
+    } catch (e) {
+      console.warn('[ExpenseStore] error checking personal group in DB:', e);
+    }
+
+    // 3. Otherwise, create a new personal group!
+    const groupMember = {
+      uid: currentUser.uid,
+      displayName: currentUser.displayName || 'Me',
+      email: currentUser.email || '',
+      photoURL: currentUser.photoURL,
+    };
+
+    const newGroup = await get().addGroup({
+      name: 'Personal Expenses',
+      emoji: '👤',
+      coverColor: '#00D9B5',
+      currency: 'INR',
+      description: 'Daily life personal expenses and bills manager',
+      members: [groupMember],
+      createdBy: currentUser.uid,
+    });
+
+    return newGroup;
+  },
 
   // ── Expenses ───────────────────────────────
 

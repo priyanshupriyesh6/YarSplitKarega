@@ -57,59 +57,96 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 // ─────────────────────────────────────────────
 import { Linking } from 'react-native';
 
-if (Platform.OS !== 'web') {
-  const handleDeepLink = async (url: string | null) => {
-    try {
-      if (!url) return;
+/**
+ * Parse and handle an OAuth deep-link URL.
+ * Exported so authStore can call it directly from the WebBrowser result
+ * without relying on the Linking event listener (which is unreliable on Android APKs).
+ *
+ * Supports both:
+ *  - Implicit flow: #access_token=...&refresh_token=...
+ *  - PKCE flow:     ?code=...
+ */
+export const handleDeepLink = async (url: string | null): Promise<void> => {
+  try {
+    if (!url) return;
+    console.log('[DeepLink] Handling URL:', url);
 
-      let queryString = '';
-      if (url.includes('#')) {
-        queryString = url.split('#')[1];
-      } else if (url.includes('?')) {
-        queryString = url.split('?')[1];
-      }
-
-      if (!queryString) return;
-
-      const params: Record<string, string> = {};
-      queryString.split('&').forEach((param) => {
+    // ── PKCE flow: URL contains ?code= ───────────────────────
+    if (url.includes('code=')) {
+      // Supabase JS client handles PKCE code exchange automatically
+      // when we call exchangeCodeForSession
+      let code: string | null = null;
+      const queryPart = url.includes('?') ? url.split('?')[1] : '';
+      queryPart.split('&').forEach((param) => {
         const [key, value] = param.split('=');
-        if (key && value) {
-          params[key] = decodeURIComponent(value);
-        }
+        if (key === 'code' && value) code = decodeURIComponent(value);
       });
 
-      const accessToken = params.access_token;
-      const refreshToken = params.refresh_token;
-
-      if (accessToken && refreshToken) {
-        const { error } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
+      if (code) {
+        console.log('[DeepLink] PKCE code found, exchanging for session...');
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
         if (error) {
-          console.error('Error setting session from deep link:', error.message);
+          console.error('[DeepLink] PKCE code exchange error:', error.message);
+        } else {
+          console.log('[DeepLink] PKCE session established successfully.');
         }
+        return;
       }
-    } catch (err) {
-      console.error('Error handling deep link:', err);
     }
-  };
 
+    // ── Implicit flow: URL contains #access_token= ───────────
+    let queryString = '';
+    if (url.includes('#')) {
+      queryString = url.split('#')[1];
+    } else if (url.includes('?')) {
+      queryString = url.split('?')[1];
+    }
+
+    if (!queryString) return;
+
+    const params: Record<string, string> = {};
+    queryString.split('&').forEach((param) => {
+      const [key, value] = param.split('=');
+      if (key && value) {
+        params[key] = decodeURIComponent(value);
+      }
+    });
+
+    const accessToken = params.access_token;
+    const refreshToken = params.refresh_token;
+
+    if (accessToken) {
+      console.log('[DeepLink] Implicit tokens found, setting session...');
+      const { error } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken || '',
+      });
+      if (error) {
+        console.error('[DeepLink] Error setting session:', error.message);
+      } else {
+        console.log('[DeepLink] Session set successfully.');
+      }
+    }
+  } catch (err) {
+    console.error('[DeepLink] Error handling deep link:', err);
+  }
+};
+
+if (Platform.OS !== 'web') {
   try {
-    // Listen to incoming deep links when the app is in the background
-    const subscription = Linking.addEventListener('url', ({ url }) => {
+    // Listen to incoming deep links when the app is in the background/foreground
+    Linking.addEventListener('url', ({ url }) => {
       handleDeepLink(url);
     });
 
-    // Check if the app was opened by a deep link from a closed state
+    // Check if the app was opened by a deep link from a cold start
     Linking.getInitialURL().then((url) => {
       if (url) handleDeepLink(url);
     }).catch((err) => {
-      console.warn('Failed to get initial URL:', err);
+      console.warn('[DeepLink] Failed to get initial URL:', err);
     });
   } catch (e) {
-    console.error('Failed to initialize deep linking listeners:', e);
+    console.error('[DeepLink] Failed to initialize deep linking listeners:', e);
   }
 }
 

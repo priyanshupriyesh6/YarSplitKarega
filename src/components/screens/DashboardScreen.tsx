@@ -2,7 +2,7 @@
 //  Dashboard Screen — Home tab
 // ─────────────────────────────────────────────
 
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,8 @@ import {
   StatusBar,
   Dimensions,
   FlatList,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,6 +23,7 @@ import { useNavigation } from '@react-navigation/native';
 
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../../constants/theme';
 import { useExpenseStore } from '../../store/expenseStore';
+import { useAuthStore } from '../../store/authStore';
 import { CURRENT_USER } from '../../utils/mockData';
 import { formatCurrency, formatDate, formatRelativeTime } from '../../utils/formatters';
 import { CATEGORY_MAP } from '../../constants/categories';
@@ -32,8 +35,24 @@ export const DashboardScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const scrollY = useRef(new Animated.Value(0)).current;
   const navigation = useNavigation<any>();
+  const [isLoadingPersonal, setIsLoadingPersonal] = useState(false);
 
-  const { groups, expenses, getTotalOwed, getTotalIOwe } = useExpenseStore();
+  const { user } = useAuthStore();
+  const activeUser = user || CURRENT_USER;
+
+  const getGreeting = () => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Good morning, 🌅';
+    if (h < 17) return 'Good afternoon, ☀️';
+    if (h < 21) return 'Good evening, 🌙';
+    return 'Good night, 🌟';
+  };
+
+  const { groups, expenses, getTotalOwed, getTotalIOwe, getOrCreatePersonalGroup } = useExpenseStore();
+  
+  // Filter out the personal group from the balances, as personal group has no debt
+  const visibleGroups = groups.filter((g) => g.name !== 'Personal Expenses');
+
   const totalOwed = getTotalOwed();
   const totalIOwe = getTotalIOwe();
   const netBalance = totalOwed - totalIOwe;
@@ -61,8 +80,8 @@ export const DashboardScreen: React.FC = () => {
         <Animated.View style={{ opacity: headerOpacity }}>
           <View style={styles.headerTop}>
             <View>
-              <Text style={styles.greeting}>Good evening, 👋</Text>
-              <Text style={styles.userName}>{CURRENT_USER.displayName.split(' ')[0]}</Text>
+              <Text style={styles.greeting}>{getGreeting()}</Text>
+              <Text style={styles.userName}>{(activeUser.displayName || 'User').split(' ')[0]}</Text>
             </View>
             <TouchableOpacity style={styles.notifButton}>
               <Ionicons name="notifications-outline" size={22} color={Colors.textSecondary} />
@@ -131,6 +150,61 @@ export const DashboardScreen: React.FC = () => {
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
       >
+        {/* Quick Actions Row */}
+        <View style={styles.quickActionsContainer}>
+          <TouchableOpacity 
+            style={styles.quickActionButton} 
+            onPress={() => {
+              navigation.navigate('Groups');
+            }}
+          >
+            <LinearGradient colors={['#6C63FF', '#8B85FF']} style={styles.quickActionIconGradient}>
+              <Ionicons name="people" size={20} color="#fff" />
+            </LinearGradient>
+            <Text style={styles.quickActionText}>Group Split</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.quickActionButton} 
+            onPress={async () => {
+              try {
+                setIsLoadingPersonal(true);
+                const personalGroup = await getOrCreatePersonalGroup();
+                setIsLoadingPersonal(false);
+                navigation.navigate('Groups', {
+                  screen: 'AddExpense',
+                  params: { groupId: personalGroup.id },
+                });
+              } catch (e) {
+                setIsLoadingPersonal(false);
+                Alert.alert('Error', 'Could not open personal group');
+              }
+            }}
+            disabled={isLoadingPersonal}
+          >
+            <LinearGradient colors={['#FF6584', '#FF8FA3']} style={styles.quickActionIconGradient}>
+              {isLoadingPersonal ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Ionicons name="person" size={20} color="#fff" />
+              )}
+            </LinearGradient>
+            <Text style={styles.quickActionText}>Personal Expense</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.quickActionButton} 
+            onPress={() => {
+              navigation.navigate('Scan');
+            }}
+          >
+            <LinearGradient colors={['#00D9B5', '#33E2C4']} style={styles.quickActionIconGradient}>
+              <Ionicons name="scan" size={20} color="#fff" />
+            </LinearGradient>
+            <Text style={styles.quickActionText}>Scan Receipt</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Active Groups */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
@@ -143,11 +217,11 @@ export const DashboardScreen: React.FC = () => {
           <FlatList
             horizontal
             showsHorizontalScrollIndicator={false}
-            data={groups}
+            data={visibleGroups}
             keyExtractor={(item) => item.id}
             contentContainerStyle={{ paddingRight: Spacing.base }}
             renderItem={({ item: group }) => {
-              const myBalance = group.balances[CURRENT_USER.uid] ?? 0;
+              const myBalance = group.balances[activeUser.uid] ?? 0;
               return (
                 <TouchableOpacity
                   onPress={() => navigation.navigate('Groups', {
@@ -192,10 +266,10 @@ export const DashboardScreen: React.FC = () => {
           </View>
 
           {recentExpenses.map((expense) => {
-            const category = CATEGORY_MAP[expense.category];
+            const category = CATEGORY_MAP[expense.category] || CATEGORY_MAP['other'];
             const group = groups.find((g) => g.id === expense.groupId);
-            const myShare = expense.splits.find((s) => s.uid === CURRENT_USER.uid)?.amount ?? 0;
-            const iPaid = expense.paidBy === CURRENT_USER.uid;
+            const myShare = expense.splits.find((s) => s.uid === activeUser.uid)?.amount ?? 0;
+            const iPaid = expense.paidBy === activeUser.uid;
 
             return (
               <Card key={expense.id} style={styles.activityCard}>
@@ -474,5 +548,38 @@ const styles = StyleSheet.create({
   activityShare: {
     fontSize: Typography.fontSize.xs,
     fontFamily: Typography.fontFamily.medium,
+  },
+  quickActionsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.base,
+    marginBottom: Spacing.xl,
+    gap: Spacing.md,
+  },
+  quickActionButton: {
+    flex: 1,
+    backgroundColor: Colors.backgroundCard,
+    borderRadius: BorderRadius.xl,
+    paddingVertical: Spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+    ...Shadow.sm,
+    gap: 8,
+  },
+  quickActionIconGradient: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Shadow.sm,
+  },
+  quickActionText: {
+    fontSize: Typography.fontSize.xs,
+    color: Colors.text,
+    fontFamily: Typography.fontFamily.semiBold,
+    textAlign: 'center',
   },
 });

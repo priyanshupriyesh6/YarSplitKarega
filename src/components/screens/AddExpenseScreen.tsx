@@ -111,7 +111,7 @@ export const AddExpenseScreen: React.FC = () => {
     }, 500);
   };
 
-  const selectedCategory = CATEGORY_MAP[category];
+  const selectedCategory = CATEGORY_MAP[category] || CATEGORY_MAP['other'];
   const paidByMember = group.members.find((m) => m.uid === paidBy);
   const splits = computedSplits();
 
@@ -129,25 +129,27 @@ export const AddExpenseScreen: React.FC = () => {
       </View>
 
       {/* Section Pills */}
-      <View style={styles.sectionPills}>
-        {(['details', 'split', 'review'] as const).map((s, i) => (
-          <TouchableOpacity
-            key={s}
-            onPress={() => setActiveSection(s)}
-            style={[
-              styles.sectionPill,
-              activeSection === s && styles.sectionPillActive,
-            ]}
-          >
-            <Text style={[
-              styles.sectionPillText,
-              activeSection === s && styles.sectionPillTextActive,
-            ]}>
-              {i + 1}. {s.charAt(0).toUpperCase() + s.slice(1)}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      {group.name !== 'Personal Expenses' && (
+        <View style={styles.sectionPills}>
+          {(['details', 'split', 'review'] as const).map((s, i) => (
+            <TouchableOpacity
+              key={s}
+              onPress={() => setActiveSection(s)}
+              style={[
+                styles.sectionPill,
+                activeSection === s && styles.sectionPillActive,
+              ]}
+            >
+              <Text style={[
+                styles.sectionPillText,
+                activeSection === s && styles.sectionPillTextActive,
+              ]}>
+                {i + 1}. {s.charAt(0).toUpperCase() + s.slice(1)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -225,30 +227,34 @@ export const AddExpenseScreen: React.FC = () => {
               </ScrollView>
 
               {/* Paid By */}
-              <Text style={styles.inputLabel}>Paid by</Text>
-              <View style={styles.paidByRow}>
-                {group.members.map((m) => (
-                  <TouchableOpacity
-                    key={m.uid}
-                    onPress={() => setPaidBy(m.uid)}
-                    style={[
-                      styles.paidByChip,
-                      paidBy === m.uid && styles.paidByChipSelected,
-                    ]}
-                  >
-                    <Avatar name={m.displayName} size={28} color={paidBy === m.uid ? Colors.primary : Colors.textMuted} />
-                    <Text style={[
-                      styles.paidByName,
-                      paidBy === m.uid && { color: Colors.primary },
-                    ]}>
-                      {m.uid === CURRENT_USER.uid ? 'You' : m.displayName.split(' ')[0]}
-                    </Text>
-                    {paidBy === m.uid && (
-                      <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </View>
+              {group.name !== 'Personal Expenses' && (
+                <>
+                  <Text style={styles.inputLabel}>Paid by</Text>
+                  <View style={styles.paidByRow}>
+                    {group.members.map((m) => (
+                      <TouchableOpacity
+                        key={m.uid}
+                        onPress={() => setPaidBy(m.uid)}
+                        style={[
+                          styles.paidByChip,
+                          paidBy === m.uid && styles.paidByChipSelected,
+                        ]}
+                      >
+                        <Avatar name={m.displayName} size={28} color={paidBy === m.uid ? Colors.primary : Colors.textMuted} />
+                        <Text style={[
+                          styles.paidByName,
+                          paidBy === m.uid && { color: Colors.primary },
+                        ]}>
+                          {m.uid === CURRENT_USER.uid ? 'You' : m.displayName.split(' ')[0]}
+                        </Text>
+                        {paidBy === m.uid && (
+                          <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>
+              )}
 
               {/* Notes */}
               <Text style={styles.inputLabel}>Notes (optional)</Text>
@@ -262,12 +268,22 @@ export const AddExpenseScreen: React.FC = () => {
                 numberOfLines={3}
               />
 
-              <Button
-                label="Next: Configure Split →"
-                onPress={() => setActiveSection('split')}
-                fullWidth
-                style={{ marginTop: Spacing.base }}
-              />
+              {group.name === 'Personal Expenses' ? (
+                <Button
+                  label={isLoading ? 'Saving...' : 'Add Expense ✓'}
+                  onPress={handleSubmit}
+                  loading={isLoading}
+                  fullWidth
+                  style={{ marginTop: Spacing.base }}
+                />
+              ) : (
+                <Button
+                  label="Next: Configure Split →"
+                  onPress={() => setActiveSection('split')}
+                  fullWidth
+                  style={{ marginTop: Spacing.base }}
+                />
+              )}
             </>
           )}
 
