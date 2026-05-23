@@ -13,6 +13,7 @@ import {
   Alert,
   ActivityIndicator,
   Image,
+  TextInput,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -33,15 +34,22 @@ import { CATEGORIES, detectCategory as detectCategoryFromText } from '../../cons
 function parseReceiptText(text: string): ParsedReceipt {
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
 
-  // Merchant: usually first meaningful line
-  const merchant = lines[0] ?? 'Unknown Merchant';
+  // Merchant: first line that isn't a receipt subtitle or generic keyword
+  let merchant = 'Unknown Merchant';
+  for (const line of lines) {
+    if (line.length > 2 && !/^(receipt|tax invoice|invoice|bill|cash bill|welcome|date|time|tel|phone|gst|outlet|store|pos)/i.test(line)) {
+      merchant = line.replace(/[*#=_\-]/g, '').trim();
+      break;
+    }
+  }
 
-  // Find totals using regex
+  // Find totals using regex (support integers, decimals, and multiple currencies)
   const totalPatterns = [
-    /total[:\s]*[\$₹€£]?\s*(\d+[\.,]\d{2})/i,
-    /grand\s*total[:\s]*[\$₹€£]?\s*(\d+[\.,]\d{2})/i,
-    /amount\s*due[:\s]*[\$₹€£]?\s*(\d+[\.,]\d{2})/i,
-    /[\$₹€£]\s*(\d+[\.,]\d{2})\s*$/im,
+    /(?:grand\s*)?total[:\s]*[\$₹€£]?\s*(\d+(?:[\.,]\d{1,2})?)/i,
+    /net\s*amount[:\s]*[\$₹€£]?\s*(\d+(?:[\.,]\d{1,2})?)/i,
+    /amount\s*(?:due|payable)[:\s]*[\$₹€£]?\s*(\d+(?:[\.,]\d{1,2})?)/i,
+    /(?:subtotal|sub\s*total)[:\s]*[\$₹€£]?\s*(\d+(?:[\.,]\d{1,2})?)/i,
+    /[\$₹€£]\s*(\d+(?:[\.,]\d{1,2})?)\s*$/im,
   ];
 
   let total: number | undefined;
@@ -53,8 +61,8 @@ function parseReceiptText(text: string): ParsedReceipt {
     }
   }
 
-  // Tax
-  const taxMatch = text.match(/(?:tax|gst|vat)[:\s]*[\$₹€£]?\s*(\d+[\.,]\d{2})/i);
+  // Tax (CGST, SGST, VAT, GST, Tax)
+  const taxMatch = text.match(/(?:tax|gst|vat|cgst|sgst)[:\s]*[\$₹€£]?\s*(\d+(?:[\.,]\d{1,2})?)/i);
   const tax = taxMatch ? parseFloat(taxMatch[1].replace(',', '.')) : undefined;
 
   // Date
@@ -68,14 +76,14 @@ function parseReceiptText(text: string): ParsedReceipt {
     if (match) { date = match[1]; break; }
   }
 
-  // Line items: rows with price pattern
-  const lineItemPattern = /^(.+?)\s+(\d+[\.,]\d{2})\s*$/;
+  // Line items: rows matching name + space + price (integer or decimal, optional /-)
+  const lineItemPattern = /^(.+?)\s+[\$₹€£]?\s*(\d+(?:[\.,]\d{1,2})?)\s*(?:\/-)?$/;
   const lineItems = lines
-    .filter((l) => lineItemPattern.test(l) && !/(total|tax|gst|vat|subtotal)/i.test(l))
+    .filter((l) => lineItemPattern.test(l) && !/(total|tax|gst|vat|subtotal|discount|cgst|sgst|service|charge|due|change|cash|card|payment|split)/i.test(l))
     .slice(0, 8)
     .map((l) => {
       const match = l.match(lineItemPattern)!;
-      return { name: match[1], price: parseFloat(match[2].replace(',', '.')) };
+      return { name: match[1].trim(), price: parseFloat(match[2].replace(',', '.')) };
     });
 
   return { merchant, total, tax, date, lineItems, rawText: text };
@@ -107,6 +115,7 @@ export const ScannerScreen: React.FC = () => {
   const [mode, setMode] = useState<'idle' | 'processing' | 'result'>('idle');
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [isPdf, setIsPdf] = useState<boolean>(false);
+  const [isFallback, setIsFallback] = useState<boolean>(false);
   const [parsedReceipt, setParsedReceipt] = useState<ParsedReceipt | null>(null);
 
   const animateScan = () => {
@@ -297,6 +306,7 @@ export const ScannerScreen: React.FC = () => {
     setImageUri(null);
     setParsedReceipt(null);
     setIsPdf(false);
+    setIsFallback(false);
   };
 
   return (
@@ -436,13 +446,29 @@ export const ScannerScreen: React.FC = () => {
           <>
             <View style={styles.resultHeader}>
               <View style={styles.successBadge}>
-                <Ionicons name="checkmark-circle" size={18} color={Colors.positive} />
-                <Text style={styles.successText}>Receipt Scanned!</Text>
+                <Ionicons name="checkmark-circle" size={18} color={isFallback ? Colors.warning : Colors.positive} />
+                <Text style={[styles.successText, isFallback && { color: Colors.warning }]}>
+                  {isFallback ? 'Simulated Scanner' : 'Receipt Scanned!'}
+                </Text>
               </View>
               <TouchableOpacity onPress={handleReset}>
                 <Text style={styles.rescanText}>Scan Again</Text>
               </TouchableOpacity>
             </View>
+
+            {isFallback && (
+              <Card style={styles.warningCard} elevated={false}>
+                <View style={styles.warningRow}>
+                  <Ionicons name="alert-circle-outline" size={24} color={Colors.warning} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.warningTitle}>OCR Service rate-limited</Text>
+                    <Text style={styles.warningText}>
+                      The free OCR.space API is temporarily busy. We've generated a template receipt layout based on realistic values. You can edit any field below to correct your expense.
+                    </Text>
+                  </View>
+                </View>
+              </Card>
+            )}
 
             {/* Parsed Data Card */}
             <Card style={styles.parsedCard} elevated>
@@ -450,24 +476,73 @@ export const ScannerScreen: React.FC = () => {
                 <View style={styles.merchantIcon}>
                   <Ionicons name="storefront" size={24} color={Colors.primary} />
                 </View>
-                <View>
-                  <Text style={styles.merchantName}>{parsedReceipt.merchant}</Text>
-                  {parsedReceipt.date && (
-                    <Text style={styles.parsedDate}>Date: {parsedReceipt.date}</Text>
-                  )}
+                <View style={{ flex: 1 }}>
+                  <View style={styles.editableContainer}>
+                    <TextInput
+                      style={styles.merchantInput}
+                      value={parsedReceipt.merchant || ''}
+                      onChangeText={(text) => setParsedReceipt({ ...parsedReceipt, merchant: text })}
+                      placeholder="Merchant Name"
+                      placeholderTextColor={Colors.textMuted}
+                    />
+                    <Ionicons name="pencil-outline" size={14} color={Colors.textMuted} />
+                  </View>
+                  <View style={styles.dateRow}>
+                    <Text style={styles.dateLabel}>Date: </Text>
+                    <TextInput
+                      style={styles.dateInput}
+                      value={parsedReceipt.date || ''}
+                      onChangeText={(text) => setParsedReceipt({ ...parsedReceipt, date: text })}
+                      placeholder="DD/MM/YYYY"
+                      placeholderTextColor={Colors.textMuted}
+                    />
+                    <Ionicons name="pencil-outline" size={12} color={Colors.textMuted} />
+                  </View>
                 </View>
               </View>
 
               {/* Line Items */}
               {parsedReceipt.lineItems.length > 0 && (
                 <>
-                  <Text style={styles.parsedSectionTitle}>Items</Text>
+                  <View style={styles.itemsHeaderRow}>
+                    <Text style={styles.parsedSectionTitle}>Items</Text>
+                    <Text style={[styles.parsedSectionTitle, { textAlign: 'right' }]}>Price (₹)</Text>
+                  </View>
                   {parsedReceipt.lineItems.map((item, i) => (
-                    <View key={i} style={styles.lineItem}>
-                      <Text style={styles.lineItemName}>{item.name}</Text>
-                      <Text style={styles.lineItemPrice}>
-                        {formatCurrency(item.price, 'INR')}
-                      </Text>
+                    <View key={i} style={styles.lineItemEditRow}>
+                      <TextInput
+                        style={styles.lineItemNameInput}
+                        value={item.name}
+                        onChangeText={(text) => {
+                          const updatedItems = [...parsedReceipt.lineItems];
+                          updatedItems[i].name = text;
+                          setParsedReceipt({ ...parsedReceipt, lineItems: updatedItems });
+                        }}
+                        placeholder="Item Name"
+                        placeholderTextColor={Colors.textMuted}
+                      />
+                      <View style={styles.lineItemPriceContainer}>
+                        <Text style={styles.currencySymbolInput}>₹</Text>
+                        <TextInput
+                          style={styles.lineItemPriceInput}
+                          value={item.price.toString()}
+                          keyboardType="numeric"
+                          onChangeText={(text) => {
+                            const val = parseFloat(text) || 0;
+                            const updatedItems = [...parsedReceipt.lineItems];
+                            updatedItems[i].price = val;
+                            
+                            // Re-calculate the grand total automatically if items are updated!
+                            const sum = updatedItems.reduce((acc, curr) => acc + curr.price, 0);
+                            const newTax = parsedReceipt.tax ?? 0;
+                            setParsedReceipt({
+                              ...parsedReceipt,
+                              lineItems: updatedItems,
+                              total: Math.round((sum + newTax) * 100) / 100
+                            });
+                          }}
+                        />
+                      </View>
                     </View>
                   ))}
                 </>
@@ -476,21 +551,42 @@ export const ScannerScreen: React.FC = () => {
               <View style={styles.parsedDivider} />
 
               {/* Totals */}
-              {parsedReceipt.tax !== undefined && (
-                <View style={styles.totalRow}>
-                  <Text style={styles.totalLabel}>Tax / GST</Text>
-                  <Text style={styles.totalValue}>
-                    {formatCurrency(parsedReceipt.tax, 'INR')}
-                  </Text>
+              <View style={styles.totalsEditContainer}>
+                <View style={styles.totalRowEdit}>
+                  <Text style={styles.totalLabelEdit}>Tax / GST (₹)</Text>
+                  <TextInput
+                    style={styles.taxInput}
+                    value={parsedReceipt.tax !== undefined ? parsedReceipt.tax.toString() : '0'}
+                    keyboardType="numeric"
+                    onChangeText={(text) => {
+                      const val = parseFloat(text) || 0;
+                      const sum = parsedReceipt.lineItems.reduce((acc, curr) => acc + curr.price, 0);
+                      setParsedReceipt({
+                        ...parsedReceipt,
+                        tax: val,
+                        total: Math.round((sum + val) * 100) / 100
+                      });
+                    }}
+                  />
                 </View>
-              )}
-              <View style={[styles.totalRow, styles.grandTotal]}>
-                <Text style={styles.grandTotalLabel}>Total</Text>
-                <Text style={styles.grandTotalValue}>
-                  {parsedReceipt.total !== undefined
-                    ? formatCurrency(parsedReceipt.total, 'INR')
-                    : '—'}
-                </Text>
+
+                <View style={[styles.totalRowEdit, styles.grandTotalEdit]}>
+                  <Text style={styles.grandTotalLabelEdit}>Total (₹)</Text>
+                  <View style={styles.grandTotalInputContainer}>
+                    <Text style={styles.grandTotalCurrencySymbol}>₹</Text>
+                    <TextInput
+                      style={styles.grandTotalInput}
+                      value={parsedReceipt.total !== undefined ? parsedReceipt.total.toString() : ''}
+                      keyboardType="numeric"
+                      onChangeText={(text) => {
+                        setParsedReceipt({
+                          ...parsedReceipt,
+                          total: parseFloat(text) || 0
+                        });
+                      }}
+                    />
+                  </View>
+                </View>
               </View>
             </Card>
 
@@ -661,6 +757,151 @@ const styles = StyleSheet.create({
     fontSize: Typography.fontSize.sm,
     color: Colors.textSecondary,
     fontFamily: Typography.fontFamily.semiBold,
+  },
+  warningCard: {
+    backgroundColor: Colors.warningAlpha,
+    borderColor: Colors.warning,
+    borderWidth: 1,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.md,
+    marginBottom: Spacing.sm,
+  },
+  warningRow: {
+    flexDirection: 'row',
+    gap: Spacing.md,
+  },
+  warningTitle: {
+    fontSize: Typography.fontSize.sm,
+    color: Colors.warning,
+    fontFamily: Typography.fontFamily.bold,
+  },
+  warningText: {
+    fontSize: Typography.fontSize.xs,
+    color: Colors.textSecondary,
+    fontFamily: Typography.fontFamily.regular,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  editableContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  merchantInput: {
+    fontSize: Typography.fontSize.lg,
+    color: Colors.text,
+    fontFamily: Typography.fontFamily.bold,
+    padding: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: 'transparent',
+    flex: 1,
+  },
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  dateLabel: {
+    fontSize: Typography.fontSize.sm,
+    color: Colors.textSecondary,
+    fontFamily: Typography.fontFamily.regular,
+  },
+  dateInput: {
+    fontSize: Typography.fontSize.sm,
+    color: Colors.textSecondary,
+    fontFamily: Typography.fontFamily.semiBold,
+    padding: 0,
+    minWidth: 90,
+  },
+  itemsHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.surfaceBorder,
+    paddingBottom: 4,
+  },
+  lineItemEditRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: Spacing.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.03)',
+  },
+  lineItemNameInput: {
+    fontSize: Typography.fontSize.sm,
+    color: Colors.textSecondary,
+    fontFamily: Typography.fontFamily.regular,
+    flex: 1,
+    paddingVertical: 4,
+  },
+  lineItemPriceContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    width: 90,
+    justifyContent: 'flex-end',
+  },
+  currencySymbolInput: {
+    fontSize: Typography.fontSize.sm,
+    color: Colors.textSecondary,
+    fontFamily: Typography.fontFamily.semiBold,
+  },
+  lineItemPriceInput: {
+    fontSize: Typography.fontSize.sm,
+    color: Colors.text,
+    fontFamily: Typography.fontFamily.semiBold,
+    textAlign: 'right',
+    paddingVertical: 4,
+    minWidth: 60,
+  },
+  totalsEditContainer: {
+    gap: Spacing.sm,
+  },
+  totalRowEdit: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  totalLabelEdit: {
+    fontSize: Typography.fontSize.sm,
+    color: Colors.textSecondary,
+    fontFamily: Typography.fontFamily.regular,
+  },
+  taxInput: {
+    fontSize: Typography.fontSize.sm,
+    color: Colors.text,
+    fontFamily: Typography.fontFamily.semiBold,
+    textAlign: 'right',
+    paddingVertical: 2,
+    minWidth: 60,
+  },
+  grandTotalEdit: {
+    marginTop: Spacing.sm,
+  },
+  grandTotalLabelEdit: {
+    fontSize: Typography.fontSize.lg,
+    color: Colors.text,
+    fontFamily: Typography.fontFamily.bold,
+  },
+  grandTotalInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  grandTotalCurrencySymbol: {
+    fontSize: Typography.fontSize.xl,
+    color: Colors.primary,
+    fontFamily: Typography.fontFamily.bold,
+  },
+  grandTotalInput: {
+    fontSize: Typography.fontSize.xl,
+    color: Colors.primary,
+    fontFamily: Typography.fontFamily.extraBold,
+    textAlign: 'right',
+    paddingVertical: 2,
+    minWidth: 80,
   },
   tipsCard: {
     gap: Spacing.sm,
