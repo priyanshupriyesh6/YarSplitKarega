@@ -29,7 +29,7 @@ export const useAuthStore = create<AuthStore>()((set, get) => ({
     set({ isLoading: true });
     try {
       const redirectUrl = Platform.OS === 'web'
-        ? (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8081')
+        ? (typeof globalThis !== 'undefined' && (globalThis as any).window ? (globalThis as any).window.location.origin : 'http://localhost:8081')
         : 'yarsplitkarega://auth-callback';
 
       const { error } = await supabase.auth.signInWithOAuth({
@@ -128,39 +128,64 @@ export const useAuthStore = create<AuthStore>()((set, get) => ({
   },
 }));
 
-// Subscribe to Supabase Auth State Changes in real-time
-supabase.auth.onAuthStateChange(async (event, session) => {
-  if (session?.user) {
-    try {
-      // Fetch public profile record from Supabase PostgreSQL
-      const { data: profile, error } = await supabase
+// Helper to structure User data
+const buildUserData = (sessionUser: any, profile: any): User => ({
+  uid: sessionUser.id,
+  displayName: profile?.display_name || sessionUser.user_metadata?.display_name || sessionUser.user_metadata?.name || sessionUser.email?.split('@')[0] || 'User',
+  email: sessionUser.email || '',
+  photoURL: profile?.avatar_url || sessionUser.user_metadata?.avatar_url,
+  defaultCurrency: profile?.default_currency || 'INR',
+  createdAt: sessionUser.created_at,
+});
+
+// Fetch initial session on startup to prevent loading freeze
+const initializeAuth = async () => {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user) {
+      const { data: profile } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', session.user.id)
         .single();
 
-      // If user profile is not ready yet, wait/fallback to metadata (the insert trigger will create it)
-      const user: User = {
-        uid: session.user.id,
-        displayName: profile?.display_name || session.user.user_metadata?.display_name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User',
-        email: session.user.email || '',
-        photoURL: profile?.avatar_url || session.user.user_metadata?.avatar_url,
-        defaultCurrency: profile?.default_currency || 'INR',
-        createdAt: session.user.created_at,
-      };
+      useAuthStore.setState({
+        user: buildUserData(session.user, profile),
+        isAuthenticated: true,
+        isLoading: false
+      });
+    } else {
+      useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false });
+    }
+  } catch (err) {
+    useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false });
+  }
+};
 
-      useAuthStore.setState({ user, isAuthenticated: true, isLoading: false });
+// Initialize session check immediately
+initializeAuth();
+
+// Subscribe to Supabase Auth State Changes in real-time
+supabase.auth.onAuthStateChange(async (event, session) => {
+  if (session?.user) {
+    try {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
+
+      useAuthStore.setState({
+        user: buildUserData(session.user, profile),
+        isAuthenticated: true,
+        isLoading: false
+      });
     } catch (err) {
-      // Fallback in case of quick network lag before public profile triggers complete
-      const user: User = {
-        uid: session.user.id,
-        displayName: session.user.user_metadata?.display_name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User',
-        email: session.user.email || '',
-        photoURL: session.user.user_metadata?.avatar_url,
-        defaultCurrency: 'INR',
-        createdAt: session.user.created_at,
-      };
-      useAuthStore.setState({ user, isAuthenticated: true, isLoading: false });
+      useAuthStore.setState({
+        user: buildUserData(session.user, null),
+        isAuthenticated: true,
+        isLoading: false
+      });
     }
   } else {
     // Session is invalid, expired, or logged out

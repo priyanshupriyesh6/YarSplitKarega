@@ -18,51 +18,64 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 });
 
 // ─────────────────────────────────────────────
-//  Deep Linking Handler for Supabase OAuth
+//  Deep Linking Handler for Supabase OAuth (Mobile Only)
 // ─────────────────────────────────────────────
 import { Linking } from 'react-native';
 
-const handleDeepLink = async (url: string | null) => {
-  if (!url) return;
+if (Platform.OS !== 'web') {
+  const handleDeepLink = async (url: string | null) => {
+    try {
+      if (!url) return;
 
-  let queryString = '';
-  if (url.includes('#')) {
-    queryString = url.split('#')[1];
-  } else if (url.includes('?')) {
-    queryString = url.split('?')[1];
-  }
+      let queryString = '';
+      if (url.includes('#')) {
+        queryString = url.split('#')[1];
+      } else if (url.includes('?')) {
+        queryString = url.split('?')[1];
+      }
 
-  if (!queryString) return;
+      if (!queryString) return;
 
-  const params: Record<string, string> = {};
-  queryString.split('&').forEach((param) => {
-    const [key, value] = param.split('=');
-    if (key && value) {
-      params[key] = decodeURIComponent(value);
+      const params: Record<string, string> = {};
+      queryString.split('&').forEach((param) => {
+        const [key, value] = param.split('=');
+        if (key && value) {
+          params[key] = decodeURIComponent(value);
+        }
+      });
+
+      const accessToken = params.access_token;
+      const refreshToken = params.refresh_token;
+
+      if (accessToken && refreshToken) {
+        const { error } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        if (error) {
+          console.error('Error setting session from deep link:', error.message);
+        }
+      }
+    } catch (err) {
+      console.error('Error handling deep link:', err);
     }
-  });
+  };
 
-  const accessToken = params.access_token;
-  const refreshToken = params.refresh_token;
-
-  if (accessToken && refreshToken) {
-    const { error } = await supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
+  try {
+    // Listen to incoming deep links when the app is in the background
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      handleDeepLink(url);
     });
-    if (error) {
-      console.error('Error setting session from deep link:', error.message);
-    }
+
+    // Check if the app was opened by a deep link from a closed state
+    Linking.getInitialURL().then((url) => {
+      if (url) handleDeepLink(url);
+    }).catch((err) => {
+      console.warn('Failed to get initial URL:', err);
+    });
+  } catch (e) {
+    console.error('Failed to initialize deep linking listeners:', e);
   }
-};
+}
 
-// Listen to incoming deep links when the app is in the background
-Linking.addEventListener('url', ({ url }) => {
-  handleDeepLink(url);
-});
-
-// Check if the app was opened by a deep link from a closed state
-Linking.getInitialURL().then((url) => {
-  if (url) handleDeepLink(url);
-});
 
