@@ -1,16 +1,11 @@
 // ─────────────────────────────────────────────
-//  Expense Store — Zustand + AsyncStorage
+//  Expense Store — Real Supabase Cloud Sync
 // ─────────────────────────────────────────────
 
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Expense, Group, Settlement, SettlementSuggestion } from '../types';
-import {
-  MOCK_EXPENSES,
-  MOCK_GROUPS,
-  CURRENT_USER,
-} from '../utils/mockData';
+import { supabase } from '../utils/supabase';
+import { Expense, Group, GroupMember, Settlement, SettlementSuggestion } from '../types';
+import { useAuthStore } from './authStore';
 import { computeSettlements, applyExpenseToBalances, reverseExpenseFromBalances } from '../utils/settlementAlgorithm';
 import { generateId } from '../utils/formatters';
 
@@ -20,21 +15,24 @@ interface ExpenseStore {
   settlements: Settlement[];
   isLoading: boolean;
 
+  // Sync actions
+  loadAllData: () => Promise<void>;
+
   // Group actions
-  addGroup: (group: Omit<Group, 'id' | 'createdAt' | 'updatedAt' | 'totalSpent' | 'balances'>) => Group;
-  updateGroup: (id: string, updates: Partial<Group>) => void;
-  deleteGroup: (id: string) => void;
+  addGroup: (group: Omit<Group, 'id' | 'createdAt' | 'updatedAt' | 'totalSpent' | 'balances'>) => Promise<Group>;
+  updateGroup: (id: string, updates: Partial<Group>) => Promise<void>;
+  deleteGroup: (id: string) => Promise<void>;
   getGroup: (id: string) => Group | undefined;
 
   // Expense actions
-  addExpense: (expense: Omit<Expense, 'id' | 'createdAt' | 'createdBy'>) => Expense;
-  updateExpense: (id: string, updates: Partial<Expense>) => void;
-  deleteExpense: (id: string) => void;
+  addExpense: (expense: Omit<Expense, 'id' | 'createdAt' | 'createdBy'>) => Promise<Expense>;
+  updateExpense: (id: string, updates: Partial<Expense>) => Promise<void>;
+  deleteExpense: (id: string) => Promise<void>;
   getExpensesByGroup: (groupId: string) => Expense[];
   getExpense: (id: string) => Expense | undefined;
 
   // Settlement actions
-  settleUp: (groupId: string, fromUid: string, toUid: string, amount: number) => void;
+  settleUp: (groupId: string, fromUid: string, toUid: string, amount: number) => Promise<void>;
   getSettlementSuggestions: (groupId: string) => SettlementSuggestion[];
 
   // Stats
@@ -42,125 +40,424 @@ interface ExpenseStore {
   getTotalIOwe: () => number;    // total I owe others
 }
 
-export const useExpenseStore = create<ExpenseStore>()(
-  persist(
-    (set, get) => ({
-  groups: MOCK_GROUPS,
-  expenses: MOCK_EXPENSES,
+export const useExpenseStore = create<ExpenseStore>()((set, get) => ({
+  groups: [],
+  expenses: [],
   settlements: [],
   isLoading: false,
 
-  // ── Groups ───────────────────────────────
+  // ── Sync Actions ───────────────────────────
 
-  addGroup: (groupData) => {
-    const newGroup: Group = {
-      ...groupData,
-      id: generateId(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      totalSpent: 0,
-      balances: Object.fromEntries(groupData.members.map((m) => [m.uid, 0])),
-    };
-    set((state) => ({ groups: [...state.groups, newGroup] }));
-    return newGroup;
+  loadAllData: async () => {
+    const currentUser = useAuthStore.getState().user;
+    if (!currentUser) {
+      set({ groups: [], expenses: [], settlements: [], isLoading: false });
+      return;
+    }
+
+    set({ isLoading: true });
+    try {
+      // 1. Fetch group memberships of active user
+      const { data: memberGroups, error: mgError } = await supabase
+        .from('group_members')
+        .select(`
+          group_id,
+          groups (
+            id,
+            name,
+            emoji,
+            cover_color,
+            currency,
+            description,
+            created_by,
+            created_at,
+            updated_at,
+            total_spent,
+            balances
+          )
+        `)
+        .eq('profile_id', currentUser.uid);
+
+      if (mgError) throw mgError;
+
+      if (!memberGroups || memberGroups.length === 0) {
+        set({ groups: [], expenses: [], settlements: [], isLoading: false });
+        return;
+      }
+
+      const groupIds = memberGroups.map((mg: any) => mg.group_id);
+
+      // 2. Fetch all members belonging to these groups
+      const { data: members, error: mError } = await supabase
+        .from('group_members')
+        .select(`
+          group_id,
+          profiles (
+            id,
+            display_name,
+            email,
+            avatar_url
+          )
+        `)
+        .in('group_id', groupIds);
+
+      if (mError) throw mError;
+
+      // Group profiles by group_id
+      const membersByGroup: Record<string, GroupMember[]> = {};
+      members?.forEach((m: any) => {
+        if (!m.profiles) return;
+        if (!membersByGroup[m.group_id]) {
+          membersByGroup[m.group_id] = [];
+        }
+        membersByGroup[m.group_id].push({
+          uid: m.profiles.id,
+          displayName: m.profiles.display_name || m.profiles.email?.split('@')[0] || 'User',
+          email: m.profiles.email || '',
+          photoURL: m.profiles.avatar_url,
+        });
+      });
+
+      // Map group memberships to Group structure
+      const groupsList: Group[] = memberGroups
+        .map((mg: any) => {
+          const g = mg.groups;
+          if (!g) return null;
+          return {
+            id: g.id,
+            name: g.name,
+            emoji: g.emoji,
+            coverColor: g.cover_color,
+            members: membersByGroup[g.id] || [],
+            createdBy: g.created_by,
+            createdAt: g.created_at,
+            updatedAt: g.updated_at,
+            currency: g.currency,
+            totalSpent: Number(g.total_spent),
+            balances: g.balances || {},
+            description: g.description,
+          };
+        })
+        .filter(Boolean) as Group[];
+
+      // 3. Fetch all expenses for these groups
+      const { data: dbExpenses, error: eError } = await supabase
+        .from('expenses')
+        .select('*')
+        .in('group_id', groupIds)
+        .order('date', { ascending: false });
+
+      if (eError) throw eError;
+
+      // 4. Fetch all splits for these expenses
+      const expenseIds = dbExpenses?.map((e) => e.id) || [];
+      let splitsList: any[] = [];
+      if (expenseIds.length > 0) {
+        const { data: dbSplits, error: sError } = await supabase
+          .from('expense_splits')
+          .select('*')
+          .in('expense_id', expenseIds);
+        if (sError) throw sError;
+        splitsList = dbSplits || [];
+      }
+
+      // Group splits by expense_id
+      const splitsByExpense: Record<string, any[]> = {};
+      splitsList.forEach((s) => {
+        if (!splitsByExpense[s.expense_id]) {
+          splitsByExpense[s.expense_id] = [];
+        }
+        splitsByExpense[s.expense_id].push({
+          uid: s.profile_id,
+          displayName: s.display_name,
+          amount: Number(s.amount),
+        });
+      });
+
+      // Map DB expenses to front-end Expense interface
+      const expensesList: Expense[] = (dbExpenses || []).map((e) => ({
+        id: e.id,
+        groupId: e.group_id,
+        title: e.title,
+        amount: Number(e.amount),
+        currency: e.currency,
+        category: e.category as any,
+        paidBy: e.paid_by,
+        paidByName: e.paid_by_name,
+        splitType: e.split_type as any,
+        splits: splitsByExpense[e.id] || [],
+        date: e.date,
+        createdAt: e.created_at,
+        createdBy: e.created_by,
+        tags: e.tags || [],
+      }));
+
+      // 5. Fetch all settlements
+      const { data: dbSettlements, error: setlError } = await supabase
+        .from('settlements')
+        .select('*')
+        .in('group_id', groupIds)
+        .order('settled_at', { ascending: false });
+
+      if (setlError) throw setlError;
+
+      const settlementsList: Settlement[] = (dbSettlements || []).map((s) => ({
+        id: s.id,
+        groupId: s.group_id,
+        fromUid: s.from_uid,
+        fromName: s.from_name,
+        toUid: s.to_uid,
+        toName: s.to_name,
+        amount: Number(s.amount),
+        currency: s.currency,
+        settledAt: s.settled_at,
+      }));
+
+      set({
+        groups: groupsList,
+        expenses: expensesList,
+        settlements: settlementsList,
+        isLoading: false,
+      });
+    } catch (err) {
+      console.error('Error loading Supabase data:', err);
+      set({ isLoading: false });
+    }
   },
 
-  updateGroup: (id, updates) => {
-    set((state) => ({
-      groups: state.groups.map((g) =>
-        g.id === id ? { ...g, ...updates, updatedAt: new Date().toISOString() } : g
-      ),
-    }));
+  // ── Groups ─────────────────────────────────
+
+  addGroup: async (groupData) => {
+    const currentUser = useAuthStore.getState().user;
+    if (!currentUser) throw new Error('Not authenticated');
+
+    set({ isLoading: true });
+    try {
+      const initialBalances = Object.fromEntries(groupData.members.map((m) => [m.uid, 0]));
+
+      // 1. Insert group record
+      const { data: newGroup, error: groupError } = await supabase
+        .from('groups')
+        .insert({
+          name: groupData.name,
+          emoji: groupData.emoji,
+          cover_color: groupData.coverColor,
+          currency: groupData.currency,
+          description: groupData.description,
+          created_by: currentUser.uid,
+          balances: initialBalances,
+          total_spent: 0,
+        })
+        .select()
+        .single();
+
+      if (groupError) throw groupError;
+
+      // 2. Insert group members junction rows
+      const memberRows = groupData.members.map((m) => ({
+        group_id: newGroup.id,
+        profile_id: m.uid,
+      }));
+
+      const { error: membersError } = await supabase
+        .from('group_members')
+        .insert(memberRows);
+
+      if (membersError) throw membersError;
+
+      // 3. Re-load from DB
+      await get().loadAllData();
+      
+      const createdGroup = get().groups.find((g) => g.id === newGroup.id);
+      if (!createdGroup) throw new Error('Failed to create group');
+      
+      return createdGroup;
+    } catch (e) {
+      set({ isLoading: false });
+      throw e;
+    }
   },
 
-  deleteGroup: (id) => {
-    set((state) => ({
-      groups: state.groups.filter((g) => g.id !== id),
-      expenses: state.expenses.filter((e) => e.groupId !== id),
-    }));
+  updateGroup: async (id, updates) => {
+    set({ isLoading: true });
+    try {
+      const { error } = await supabase
+        .from('groups')
+        .update({
+          name: updates.name,
+          emoji: updates.emoji,
+          cover_color: updates.coverColor,
+          description: updates.description,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id);
+
+      if (error) throw error;
+      await get().loadAllData();
+    } catch (e) {
+      set({ isLoading: false });
+      throw e;
+    }
+  },
+
+  deleteGroup: async (id) => {
+    set({ isLoading: true });
+    try {
+      const { error } = await supabase
+        .from('groups')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      await get().loadAllData();
+    } catch (e) {
+      set({ isLoading: false });
+      throw e;
+    }
   },
 
   getGroup: (id) => get().groups.find((g) => g.id === id),
 
-  // ── Expenses ─────────────────────────────
+  // ── Expenses ───────────────────────────────
 
-  addExpense: (expenseData) => {
-    const newExpense: Expense = {
-      ...expenseData,
-      id: generateId(),
-      createdAt: new Date().toISOString(),
-      createdBy: CURRENT_USER.uid,
-    };
+  addExpense: async (expenseData) => {
+    const currentUser = useAuthStore.getState().user;
+    if (!currentUser) throw new Error('Not authenticated');
 
-    set((state) => {
-      // Update group balances
-      const group = state.groups.find((g) => g.id === newExpense.groupId);
-      if (!group) return { expenses: [...state.expenses, newExpense] };
+    set({ isLoading: true });
+    try {
+      // 1. Insert expense record
+      const { data: newExp, error: expError } = await supabase
+        .from('expenses')
+        .insert({
+          group_id: expenseData.groupId,
+          title: expenseData.title,
+          amount: expenseData.amount,
+          currency: expenseData.currency,
+          category: expenseData.category,
+          paid_by: expenseData.paidBy,
+          paid_by_name: expenseData.paidByName,
+          split_type: expenseData.splitType,
+          date: expenseData.date,
+          tags: expenseData.tags,
+          created_by: currentUser.uid,
+        })
+        .select()
+        .single();
 
-      const newBalances = applyExpenseToBalances(
-        group.balances,
-        newExpense.paidBy,
-        newExpense.splits,
-        newExpense.amount,
-      );
+      if (expError) throw expError;
 
-      const updatedGroups = state.groups.map((g) =>
-        g.id === newExpense.groupId
-          ? {
-              ...g,
-              balances: newBalances,
-              totalSpent: g.totalSpent + newExpense.amount,
-              updatedAt: new Date().toISOString(),
-            }
-          : g
-      );
+      // 2. Insert splits rows
+      const splitRows = expenseData.splits.map((s) => ({
+        expense_id: newExp.id,
+        profile_id: s.uid,
+        display_name: s.displayName,
+        amount: s.amount,
+      }));
 
-      return {
-        expenses: [...state.expenses, newExpense],
-        groups: updatedGroups,
-      };
-    });
+      const { error: splitError } = await supabase
+        .from('expense_splits')
+        .insert(splitRows);
 
-    return newExpense;
+      if (splitError) throw splitError;
+
+      // 3. Update Group balances and totalSpent
+      const group = get().groups.find((g) => g.id === expenseData.groupId);
+      if (group) {
+        const newBalances = applyExpenseToBalances(
+          group.balances,
+          expenseData.paidBy,
+          expenseData.splits,
+          expenseData.amount
+        );
+
+        const { error: balError } = await supabase
+          .from('groups')
+          .update({
+            balances: newBalances,
+            total_spent: group.totalSpent + expenseData.amount,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', expenseData.groupId);
+
+        if (balError) throw balError;
+      }
+
+      await get().loadAllData();
+      const createdExpense = get().expenses.find((e) => e.id === newExp.id);
+      if (!createdExpense) throw new Error('Failed to create expense');
+
+      return createdExpense;
+    } catch (e) {
+      set({ isLoading: false });
+      throw e;
+    }
   },
 
-  updateExpense: (id, updates) => {
-    set((state) => ({
-      expenses: state.expenses.map((e) => (e.id === id ? { ...e, ...updates } : e)),
-    }));
+  updateExpense: async (id, updates) => {
+    // Basic implementation (reload data after db update)
+    set({ isLoading: true });
+    try {
+      const { error } = await supabase
+        .from('expenses')
+        .update({
+          title: updates.title,
+          amount: updates.amount,
+          category: updates.category,
+          date: updates.date,
+          tags: updates.tags,
+        })
+        .eq('id', id);
+
+      if (error) throw error;
+      await get().loadAllData();
+    } catch (e) {
+      set({ isLoading: false });
+      throw e;
+    }
   },
 
-  deleteExpense: (id) => {
+  deleteExpense: async (id) => {
     const expense = get().expenses.find((e) => e.id === id);
     if (!expense) return;
 
-    set((state) => {
-      const group = state.groups.find((g) => g.id === expense.groupId);
-      let updatedGroups = state.groups;
-
+    set({ isLoading: true });
+    try {
+      // 1. Revert Group balances first
+      const group = get().groups.find((g) => g.id === expense.groupId);
       if (group) {
         const newBalances = reverseExpenseFromBalances(
           group.balances,
           expense.paidBy,
           expense.splits,
-          expense.amount,
+          expense.amount
         );
-        updatedGroups = state.groups.map((g) =>
-          g.id === expense.groupId
-            ? {
-                ...g,
-                balances: newBalances,
-                totalSpent: Math.max(0, g.totalSpent - expense.amount),
-              }
-            : g
-        );
+
+        const { error: balError } = await supabase
+          .from('groups')
+          .update({
+            balances: newBalances,
+            total_spent: Math.max(0, group.totalSpent - expense.amount),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', expense.groupId);
+
+        if (balError) throw balError;
       }
 
-      return {
-        expenses: state.expenses.filter((e) => e.id !== id),
-        groups: updatedGroups,
-      };
-    });
+      // 2. Delete expense (Postgres cascade will delete expense_splits automatically)
+      const { error: delError } = await supabase
+        .from('expenses')
+        .delete()
+        .eq('id', id);
+
+      if (delError) throw delError;
+
+      await get().loadAllData();
+    } catch (e) {
+      set({ isLoading: false });
+      throw e;
+    }
   },
 
   getExpensesByGroup: (groupId) =>
@@ -170,36 +467,52 @@ export const useExpenseStore = create<ExpenseStore>()(
 
   getExpense: (id) => get().expenses.find((e) => e.id === id),
 
-  // ── Settlements ──────────────────────────
+  // ── Settlements ────────────────────────────
 
-  settleUp: (groupId, fromUid, toUid, amount) => {
-    const settlement: Settlement = {
-      id: generateId(),
-      groupId,
-      fromUid,
-      fromName: '',
-      toUid,
-      toName: '',
-      amount,
-      currency: 'INR',
-      settledAt: new Date().toISOString(),
-    };
+  settleUp: async (groupId, fromUid, toUid, amount) => {
+    const group = get().groups.find((g) => g.id === groupId);
+    if (!group) throw new Error('Group not found');
 
-    set((state) => {
-      // Update balances in group
-      const updatedGroups = state.groups.map((g) => {
-        if (g.id !== groupId) return g;
-        const newBalances = { ...g.balances };
-        newBalances[toUid] = (newBalances[toUid] ?? 0) - amount;
-        newBalances[fromUid] = (newBalances[fromUid] ?? 0) + amount;
-        return { ...g, balances: newBalances };
-      });
+    const fromName = group.members.find((m) => m.uid === fromUid)?.displayName || 'Someone';
+    const toName = group.members.find((m) => m.uid === toUid)?.displayName || 'Someone';
 
-      return {
-        settlements: [...state.settlements, settlement],
-        groups: updatedGroups,
-      };
-    });
+    set({ isLoading: true });
+    try {
+      // 1. Insert settlement payment record
+      const { error: setlError } = await supabase
+        .from('settlements')
+        .insert({
+          group_id: groupId,
+          from_uid: fromUid,
+          from_name: fromName,
+          to_uid: toUid,
+          to_name: toName,
+          amount,
+          currency: 'INR',
+        });
+
+      if (setlError) throw setlError;
+
+      // 2. Update Group balances (Settle up balances directly)
+      const newBalances = { ...group.balances };
+      newBalances[toUid] = (newBalances[toUid] ?? 0) - amount;
+      newBalances[fromUid] = (newBalances[fromUid] ?? 0) + amount;
+
+      const { error: balError } = await supabase
+        .from('groups')
+        .update({
+          balances: newBalances,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', groupId);
+
+      if (balError) throw balError;
+
+      await get().loadAllData();
+    } catch (e) {
+      set({ isLoading: false });
+      throw e;
+    }
   },
 
   getSettlementSuggestions: (groupId) => {
@@ -212,10 +525,12 @@ export const useExpenseStore = create<ExpenseStore>()(
     return computeSettlements(group.balances, memberNames);
   },
 
-  // ── Stats ────────────────────────────────
+  // ── Stats ──────────────────────────────────
 
   getTotalOwed: () => {
-    const uid = CURRENT_USER.uid;
+    const currentUser = useAuthStore.getState().user;
+    if (!currentUser) return 0;
+    const uid = currentUser.uid;
     return get().groups.reduce((total, group) => {
       const balance = group.balances[uid] ?? 0;
       return total + (balance > 0 ? balance : 0);
@@ -223,21 +538,22 @@ export const useExpenseStore = create<ExpenseStore>()(
   },
 
   getTotalIOwe: () => {
-    const uid = CURRENT_USER.uid;
+    const currentUser = useAuthStore.getState().user;
+    if (!currentUser) return 0;
+    const uid = currentUser.uid;
     return get().groups.reduce((total, group) => {
       const balance = group.balances[uid] ?? 0;
       return total + (balance < 0 ? -balance : 0);
     }, 0);
   },
-    }),
-    {
-      name: 'yarsplitkarega-expenses',
-      storage: createJSONStorage(() => AsyncStorage),
-      partialize: (state) => ({
-        groups: state.groups,
-        expenses: state.expenses,
-        settlements: state.settlements,
-      }),
-    }
-  )
-);
+}));
+
+// Automatically fetch live Supabase data on user login, and clear on logout
+useAuthStore.subscribe((state) => {
+  const user = state.user;
+  if (user) {
+    useExpenseStore.getState().loadAllData();
+  } else {
+    useExpenseStore.setState({ groups: [], expenses: [], settlements: [] });
+  }
+});
