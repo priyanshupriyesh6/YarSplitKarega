@@ -1,16 +1,51 @@
-import 'react-native-url-polyfill/auto';
+import { Platform } from 'react-native';
+
+// Polyfill only on native mobile platforms to avoid overriding browser standard behaviors
+if (Platform.OS !== 'web') {
+  require('react-native-url-polyfill/auto');
+}
+
 import { createClient } from '@supabase/supabase-js';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // In Expo SDK 49+, variables prefixed with EXPO_PUBLIC_ are automatically available in process.env
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://zrhppwdtcsyodfivnrdg.supabase.co';
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpyaHBwd2R0Y3N5b2RmaXZucmRnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk0ODg2MzcsImV4cCI6MjA5NTA2NDYzN30.hXefksSX74eG05oOmSvYI4DhwbAoN3r5dYJUjJvVquw';
 
-import { Platform } from 'react-native';
+// Custom Web Storage Adapter to bypass async storage shims on Web
+const customWebStorage = {
+  getItem: (key: string) => {
+    try {
+      if (typeof globalThis !== 'undefined' && (globalThis as any).localStorage) {
+        return (globalThis as any).localStorage.getItem(key);
+      }
+    } catch (e) {
+      console.warn('Failed to read from localStorage:', e);
+    }
+    return null;
+  },
+  setItem: (key: string, value: string) => {
+    try {
+      if (typeof globalThis !== 'undefined' && (globalThis as any).localStorage) {
+        (globalThis as any).localStorage.setItem(key, value);
+      }
+    } catch (e) {
+      console.warn('Failed to write to localStorage:', e);
+    }
+  },
+  removeItem: (key: string) => {
+    try {
+      if (typeof globalThis !== 'undefined' && (globalThis as any).localStorage) {
+        (globalThis as any).localStorage.removeItem(key);
+      }
+    } catch (e) {
+      console.warn('Failed to remove from localStorage:', e);
+    }
+  },
+};
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    storage: AsyncStorage,
+    storage: Platform.OS === 'web' ? customWebStorage : require('@react-native-async-storage/async-storage').default,
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: Platform.OS === 'web',

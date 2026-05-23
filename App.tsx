@@ -32,6 +32,10 @@ export default function App() {
 
   const { isAuthenticated, isLoading } = useAuthStore();
 
+  React.useEffect(() => {
+    console.log('--- APP STATES ---', { fontsLoaded, isLoading, isAuthenticated });
+  }, [fontsLoaded, isLoading, isAuthenticated]);
+
   if (!fontsLoaded || isLoading) {
     return (
       <View style={styles.splash}>

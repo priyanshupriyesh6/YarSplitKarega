@@ -140,14 +140,28 @@ const buildUserData = (sessionUser: any, profile: any): User => ({
 
 // Fetch initial session on startup to prevent loading freeze
 const initializeAuth = async () => {
+  console.log('[Auth] initializeAuth: Starting session check...');
+
+  // Safety fallback timeout: if Supabase getSession hangs indefinitely,
+  // we force the loader to dismiss so the user can interact with the app.
+  const safetyTimeout = setTimeout(() => {
+    console.warn('[Auth] initializeAuth: Session check is taking too long. Forcing loader dismissal.');
+    useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false });
+  }, 1500);
+
   try {
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { session }, error } = await supabase.auth.getSession();
+    clearTimeout(safetyTimeout);
+    console.log('[Auth] initializeAuth: getSession finished.', { hasSession: !!session, error });
+
     if (session?.user) {
-      const { data: profile } = await supabase
+      console.log('[Auth] initializeAuth: Fetching user profile for UUID:', session.user.id);
+      const { data: profile, error: profileErr } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', session.user.id)
         .single();
+      console.log('[Auth] initializeAuth: Profile query completed.', { hasProfile: !!profile, error: profileErr });
 
       useAuthStore.setState({
         user: buildUserData(session.user, profile),
@@ -155,9 +169,12 @@ const initializeAuth = async () => {
         isLoading: false
       });
     } else {
+      console.log('[Auth] initializeAuth: No active session. Transitioning to login.');
       useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false });
     }
   } catch (err) {
+    clearTimeout(safetyTimeout);
+    console.error('[Auth] initializeAuth: Fatal exception caught:', err);
     useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false });
   }
 };
