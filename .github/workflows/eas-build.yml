@@ -1,0 +1,62 @@
+name: EAS Build Automation
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'EAS Build Platform'
+        required: true
+        default: 'android'
+        type: choice
+        options:
+          - android
+          - all
+      profile:
+        description: 'EAS Build Profile'
+        required: true
+        default: 'preview'
+        type: choice
+        options:
+          - development
+          - preview
+          - production
+
+jobs:
+  build:
+    name: 🏗️ EAS Cloud Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: 'npm'
+
+      - name: ⚙️ Setup Expo & EAS
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: 📦 Install Dependencies
+        run: npm ci
+
+      - name: 🚀 Run EAS Build
+        run: |
+          PROFILE="${{ github.event.inputs.profile }}"
+          PLATFORM="${{ github.event.inputs.platform }}"
+          
+          # Use defaults if triggered by push or pull request events
+          if [ -z "$PROFILE" ]; then PROFILE="preview"; fi
+          if [ -z "$PLATFORM" ]; then PLATFORM="android"; fi
+          
+          echo "Building on EAS for platform: $PLATFORM with profile: $PROFILE"
+          eas build --platform "$PLATFORM" --profile "$PROFILE" --non-interactive

@@ -133,6 +133,43 @@ eas build --profile production --platform android
 
 ---
 
+## CI/CD Automation
+
+This project is configured with GitHub Actions to automate EAS builds in the cloud. The workflow is located at `.github/workflows/eas-build.yml`.
+
+### Automated Triggers
+- **Branch Pushes & PRs:** Automatically triggers an Android `preview` profile build when changes are pushed or merged into the `main` or `master` branches.
+
+### Manual Triggers (GitHub UI)
+You can manually run builds directly from your repository's **Actions** tab on GitHub:
+1. Go to the **Actions** tab in your repository.
+2. Select the **EAS Build Automation** workflow from the left sidebar.
+3. Click the **Run workflow** dropdown.
+4. Select the target branch, target **platform** (`android`, `all`), and **profile** (`development`, `preview`, `production`).
+5. Click **Run workflow** to initiate.
+
+### Setup Instructions
+
+To activate the automated workflow, you need to link your GitHub repository to your Expo account:
+
+1. **Generate an Expo Access Token:**
+   - Go to your [Expo Access Tokens Dashboard](https://expo.dev/settings/access-tokens).
+   - Click **Create token**, give it a name (e.g., `GitHub Actions`), and copy the generated token.
+
+2. **Add the Token to GitHub Secrets:**
+   - In your GitHub repository, navigate to **Settings** -> **Secrets and variables** -> **Actions**.
+   - Click **New repository secret**.
+   - Set the name to `EXPO_TOKEN`.
+   - Paste your generated Expo Access Token into the value field and click **Add secret**.
+
+3. **Android Keystore Setup (First Time Only):**
+   - Ensure your Android credentials have been configured on the Expo servers. If you have already run a manual EAS build from your terminal, this is done automatically. If not, run:
+     ```bash
+     eas credentials
+     ```
+
+---
+
 ## License
 
 Copyright (c) 2025 Priyanshu Priyesh. All Rights Reserved.
@@ -140,3 +177,4 @@ Copyright (c) 2025 Priyanshu Priyesh. All Rights Reserved.
 This software is proprietary and confidential. Unauthorized use, copying,
 modification, or distribution of this software is strictly prohibited.
 See the [LICENSE](./LICENSE) file for full terms.
+
