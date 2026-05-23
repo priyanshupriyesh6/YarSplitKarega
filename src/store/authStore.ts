@@ -6,6 +6,11 @@ import { create } from 'zustand';
 import { supabase } from '../utils/supabase';
 import { User } from '../types';
 import { Platform } from 'react-native';
+import * as Linking from 'expo-linking';
+import * as WebBrowser from 'expo-web-browser';
+
+// Allow session completions on Web standard contexts
+WebBrowser.maybeCompleteAuthSession();
 
 interface AuthStore {
   user: User | null;
@@ -28,22 +33,38 @@ export const useAuthStore = create<AuthStore>()((set, get) => ({
   signInWithGoogle: async () => {
     set({ isLoading: true });
     try {
-      const redirectUrl = Platform.OS === 'web'
-        ? (typeof globalThis !== 'undefined' && (globalThis as any).window ? (globalThis as any).window.location.origin : 'http://localhost:8081')
-        : 'yarsplitkarega://auth-callback';
+      const redirectUrl = Linking.createURL('auth-callback');
+      console.log('[Auth] Google Login - Redirect URL:', redirectUrl);
 
-      const { error } = await supabase.auth.signInWithOAuth({
+      const isWeb = Platform.OS === 'web';
+
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: redirectUrl,
+          skipBrowserRedirect: !isWeb,
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',
           },
         },
       });
+
       if (error) throw error;
+
+      if (!isWeb && data?.url) {
+        console.log('[Auth] Mobile OAuth URL received. Opening WebBrowser:', data.url);
+        const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
+        console.log('[Auth] Mobile WebBrowser session finished with type:', result.type);
+        
+        // If user manually cancels the browser modal (result.type === 'cancel' or 'dismiss'),
+        // we must dismiss the loading screen!
+        if (result.type !== 'success') {
+          set({ isLoading: false });
+        }
+      }
     } catch (e) {
+      console.error('[Auth] Google Auth Error:', e);
       set({ isLoading: false });
       throw e;
     }

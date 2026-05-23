@@ -10,6 +10,7 @@ import {
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Colors, Typography, BorderRadius, Shadow } from '../../constants/theme';
 
 const TABS = [
@@ -62,7 +63,7 @@ const TabItem: React.FC<TabItemProps> = ({ route, index, state, navigation }) =>
     }
   };
 
-  // Special centre "Scan" button
+  // Special centre "Scan" button placed back in the BlurView
   if (route.name === 'Scanner') {
     return (
       <TouchableOpacity
@@ -78,13 +79,11 @@ const TabItem: React.FC<TabItemProps> = ({ route, index, state, navigation }) =>
             isFocused && styles.centerButtonActive,
           ]}
         >
-          <View style={styles.centerButtonInner}>
-            <Ionicons
-              name={isFocused ? (tab.iconFocused as any) : (tab.icon as any)}
-              size={26}
-              color={Colors.text}
-            />
-          </View>
+          <Ionicons
+            name={isFocused ? (tab.iconFocused as any) : (tab.icon as any)}
+            size={24}
+            color={Colors.text}
+          />
         </Animated.View>
       </TouchableOpacity>
     );
@@ -195,26 +194,21 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: -24,
+    marginTop: -8, // Subtle raise inside the BlurView row
   },
   centerButton: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Colors.primary,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
     ...Shadow.md,
   },
   centerButtonActive: {
+    borderColor: Colors.accent,
     backgroundColor: Colors.primaryDark,
-  },
-  centerButtonInner: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.primary,
   },
 });
