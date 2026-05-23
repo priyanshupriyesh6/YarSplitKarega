@@ -30,6 +30,7 @@ export const useAuthStore = create<AuthStore>()((set, get) => ({
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
+          redirectTo: 'yarsplitkarega://auth-callback',
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',
