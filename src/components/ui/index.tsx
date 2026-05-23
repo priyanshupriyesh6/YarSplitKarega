@@ -105,7 +105,7 @@ export const Button: React.FC<ButtonProps> = ({
           style={[
             styles.buttonBase,
             { paddingVertical: sizeStyles.paddingVertical, paddingHorizontal: sizeStyles.paddingHorizontal },
-            ...Shadow.sm,
+            Shadow.sm,
             fullWidth && { width: '100%' },
           ]}
         >
