@@ -5,6 +5,7 @@
 import { create } from 'zustand';
 import { supabase } from '../utils/supabase';
 import { User } from '../types';
+import { Platform } from 'react-native';
 
 interface AuthStore {
   user: User | null;
@@ -27,10 +28,14 @@ export const useAuthStore = create<AuthStore>()((set, get) => ({
   signInWithGoogle: async () => {
     set({ isLoading: true });
     try {
+      const redirectUrl = Platform.OS === 'web'
+        ? (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8081')
+        : 'yarsplitkarega://auth-callback';
+
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: 'yarsplitkarega://auth-callback',
+          redirectTo: redirectUrl,
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',
