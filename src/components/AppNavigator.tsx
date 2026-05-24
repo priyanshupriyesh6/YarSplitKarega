@@ -12,11 +12,13 @@ import { CustomTabBar } from './navigation/CustomTabBar';
 
 // Screens
 import { DashboardScreen } from './screens/DashboardScreen';
+import { TransactionsScreen } from './screens/TransactionsScreen';
 import { ScannerScreen } from './screens/ScannerScreen';
 import { GroupListScreen, GroupDetailScreen } from './screens/GroupsScreen';
 import { AddExpenseScreen } from './screens/AddExpenseScreen';
 import { ReportsScreen } from './screens/ReportsScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
+import { PersonalExpensesScreen } from './screens/PersonalExpensesScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -48,6 +50,7 @@ function GroupsStack() {
       />
       <Stack.Screen name="ExpenseDetail" component={GroupDetailScreen} />
       <Stack.Screen name="SettleUp" component={SettleUpScreen} />
+      <Stack.Screen name="PersonalExpenses" component={PersonalExpensesScreen} />
     </Stack.Navigator>
   );
 }
@@ -172,8 +175,9 @@ function MainTabs() {
       }}
     >
       <Tab.Screen name="Dashboard" component={DashboardScreen} />
-      <Tab.Screen name="Scanner" component={ScannerScreen} />
+      <Tab.Screen name="Transactions" component={TransactionsScreen} />
       <Tab.Screen name="Groups" component={GroupsStack} />
+      <Tab.Screen name="Scanner" component={ScannerScreen} />
       <Tab.Screen name="Reports" component={ReportsScreen} />
       <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>

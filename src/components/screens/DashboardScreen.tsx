@@ -35,7 +35,7 @@ export const DashboardScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const scrollY = useRef(new Animated.Value(0)).current;
   const navigation = useNavigation<any>();
-  const [isLoadingPersonal, setIsLoadingPersonal] = useState(false);
+
 
   const { user } = useAuthStore();
   const activeUser = user || CURRENT_USER;
@@ -166,28 +166,14 @@ export const DashboardScreen: React.FC = () => {
 
           <TouchableOpacity 
             style={styles.quickActionButton} 
-            onPress={async () => {
-              try {
-                setIsLoadingPersonal(true);
-                const personalGroup = await getOrCreatePersonalGroup();
-                setIsLoadingPersonal(false);
-                navigation.navigate('Groups', {
-                  screen: 'AddExpense',
-                  params: { groupId: personalGroup.id },
-                });
-              } catch (e) {
-                setIsLoadingPersonal(false);
-                Alert.alert('Error', 'Could not open personal group');
-              }
+            onPress={() => {
+              navigation.navigate('Groups', {
+                screen: 'PersonalExpenses',
+              });
             }}
-            disabled={isLoadingPersonal}
           >
             <LinearGradient colors={['#FF6584', '#FF8FA3']} style={styles.quickActionIconGradient}>
-              {isLoadingPersonal ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Ionicons name="person" size={20} color="#fff" />
-              )}
+              <Ionicons name="person" size={20} color="#fff" />
             </LinearGradient>
             <Text style={styles.quickActionText}>Personal Expense</Text>
           </TouchableOpacity>
@@ -195,7 +181,7 @@ export const DashboardScreen: React.FC = () => {
           <TouchableOpacity 
             style={styles.quickActionButton} 
             onPress={() => {
-              navigation.navigate('Scan');
+              navigation.navigate('Scanner');
             }}
           >
             <LinearGradient colors={['#00D9B5', '#33E2C4']} style={styles.quickActionIconGradient}>

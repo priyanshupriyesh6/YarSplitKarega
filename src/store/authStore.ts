@@ -67,11 +67,17 @@ export const useAuthStore = create<AuthStore>()((set, get) => ({
           const { data: { session } } = await supabase.auth.getSession();
           if (session?.user) {
             console.log('[Auth] Google Login: Session found after deep link. Setting state directly.');
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', session.user.id)
-              .single();
+            let profile = null;
+            try {
+              const { data } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', session.user.id)
+                .single();
+              profile = data;
+            } catch (profErr) {
+              console.warn('[Auth] Non-fatal: failed to fetch profile in Google Sign-In:', profErr);
+            }
 
             set({
               user: buildUserData(session.user, profile),
@@ -121,11 +127,17 @@ export const useAuthStore = create<AuthStore>()((set, get) => ({
 
       if (data?.session?.user) {
         console.log('[Auth] signInWithEmail: Password auth succeeded. Setting state directly.');
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', data.session.user.id)
-          .single();
+        let profile = null;
+        try {
+          const { data: prof } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', data.session.user.id)
+            .single();
+          profile = prof;
+        } catch (profErr) {
+          console.warn('[Auth] Non-fatal: failed to fetch profile in signInWithEmail:', profErr);
+        }
 
         set({
           user: buildUserData(data.session.user, profile),
@@ -173,11 +185,17 @@ export const useAuthStore = create<AuthStore>()((set, get) => ({
       }
 
       console.log('[Auth] signUp: Session created instantly. Setting state directly.');
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', data.session.user.id)
-        .single();
+      let profile = null;
+      try {
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', data.session.user.id)
+          .single();
+        profile = prof;
+      } catch (profErr) {
+        console.warn('[Auth] Non-fatal: failed to fetch profile in signUp:', profErr);
+      }
 
       set({
         user: buildUserData(data.session.user, profile),
@@ -264,12 +282,17 @@ const initializeAuth = async () => {
 
     if (session?.user) {
       console.log('[Auth] initializeAuth: Fetching user profile for UUID:', session.user.id);
-      const { data: profile, error: profileErr } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .single();
-      console.log('[Auth] initializeAuth: Profile query completed.', { hasProfile: !!profile, error: profileErr });
+      let profile = null;
+      try {
+        const { data } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+        profile = data;
+      } catch (profErr) {
+        console.warn('[Auth] initializeAuth: Profile query failed (non-fatal):', profErr);
+      }
 
       useAuthStore.setState({
         user: buildUserData(session.user, profile),

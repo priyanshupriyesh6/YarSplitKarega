@@ -140,13 +140,7 @@ create policy "Members can update their groups" on public.groups
 
 -- Group Members Policies
 create policy "Members can view group members" on public.group_members
-  for select using (
-    exists (
-      select 1 from public.group_members gm
-      where gm.group_id = group_members.group_id
-      and gm.profile_id = auth.uid()
-    )
-  );
+  for select using (auth.uid() is not null);
 
 create policy "Members can insert membership" on public.group_members
   for insert with check (auth.uid() is not null);

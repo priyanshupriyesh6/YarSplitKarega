@@ -85,6 +85,7 @@ export interface ParsedReceipt {
   subtotal?: number;
   tax?: number;
   date?: string;
+  category?: string;
   lineItems: ReceiptLineItem[];
   rawText: string;
 }
@@ -157,6 +158,7 @@ export type RootStackParamList = {
 
 export type MainTabParamList = {
   Dashboard: undefined;
+  Transactions: undefined;
   Scanner: undefined;
   Groups: undefined;
   Reports: undefined;
@@ -171,4 +173,5 @@ export type GroupStackParamList = {
   SettleUp: { groupId: string };
   AddGroup: undefined;
   InviteMember: { groupId: string };
+  PersonalExpenses: undefined;
 };
